@@ -8,7 +8,6 @@ import {
   CountingLine,
   ROIZone,
   Point,
-  Keypoint,
 } from '../types';
 import { SimpleCentroidTracker } from '../utils/tracker';
 import {
@@ -115,6 +114,9 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     loadModel();
     return () => {
       isMounted = false;
+      // Libera o modelo e os buffers associados quando o componente sai da tela.
+      modelRef.current?.dispose?.();
+      modelRef.current = null;
     };
   }, []);
 
@@ -191,28 +193,10 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         const personDetections = predictions
           .filter((pred) => pred.class === 'person' && pred.score >= config.confidenceThreshold)
           .map((pred) => {
-            // Synthesize pose keypoints if in YOLOv8 Pose mode
-            let synthesizedKeypoints: Keypoint[] | undefined = undefined;
-            if (config.selectedModel === 'yolov8-pose') {
-              const [bx, by, bw, bh] = pred.bbox;
-              synthesizedKeypoints = [
-                { x: bx + bw * 0.5, y: by + bh * 0.15, name: 'nose', score: 0.9 }, // Head
-                { x: bx + bw * 0.35, y: by + bh * 0.3, name: 'l_shoulder', score: 0.85 },
-                { x: bx + bw * 0.65, y: by + bh * 0.3, name: 'r_shoulder', score: 0.85 },
-                { x: bx + bw * 0.25, y: by + bh * 0.5, name: 'l_elbow', score: 0.8 },
-                { x: bx + bw * 0.75, y: by + bh * 0.5, name: 'r_elbow', score: 0.8 },
-                { x: bx + bw * 0.4, y: by + bh * 0.65, name: 'l_hip', score: 0.82 },
-                { x: bx + bw * 0.6, y: by + bh * 0.65, name: 'r_hip', score: 0.82 },
-                { x: bx + bw * 0.4, y: by + bh * 0.95, name: 'l_ankle', score: 0.78 },
-                { x: bx + bw * 0.6, y: by + bh * 0.95, name: 'r_ankle', score: 0.78 },
-              ];
-            }
-
             return {
               bbox: pred.bbox as [number, number, number, number],
               score: pred.score,
               class: 'Pessoa',
-              keypoints: synthesizedKeypoints,
             };
           });
 
@@ -494,6 +478,32 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     }
   };
 
+  // Libera recursos temporários gerados durante a reprodução/gravação.
+  const cleanupRuntimeResources = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.ondataavailable = null;
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+    heatmapDataRef.current = null;
+  };
+
+  // Garante limpeza automática ao desmontar o componente.
+  useEffect(() => {
+    return () => {
+      cleanupRuntimeResources();
+      const stream = videoRef.current?.srcObject as MediaStream | null;
+      stream?.getTracks().forEach((track) => track.stop());
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      }
+    };
+  }, []);
+
   // Recording Video Output Handler
   const toggleRecording = () => {
     if (isRecording) {
@@ -515,12 +525,17 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       };
 
       recorder.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        const chunks = recordedChunksRef.current;
+        const blob = new Blob(chunks, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `YOLOv8_Person_Detection_${Date.now()}.webm`;
+        a.download = `YOLOv8_Nano_Person_Detection_${Date.now()}.webm`;
         a.click();
+        // O download já foi iniciado; revoga o Blob URL e zera os chunks.
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        recordedChunksRef.current = [];
+        mediaRecorderRef.current = null;
       };
 
       recorder.start();
@@ -592,8 +607,8 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
             <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center animate-bounce">
               <Sparkles className="w-6 h-6 text-emerald-400 animate-spin" />
             </div>
-            <p className="text-sm font-semibold text-slate-200">Inicializando Modelo YOLOv8 Ultralytics...</p>
-            <p className="text-xs text-slate-400 max-w-sm">Carregando pesos de detecção neural para contagem e delimitadores em tempo real.</p>
+            <p className="text-sm font-semibold text-slate-200">Inicializando YOLOv8 Nano...</p>
+            <p className="text-xs text-slate-400 max-w-sm">Carregando o único modelo ativo para detecção de pessoas em tempo real.</p>
           </div>
         )}
 

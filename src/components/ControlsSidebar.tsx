@@ -1,5 +1,5 @@
 import React from 'react';
-import { DetectionConfig, ModelOption, CountingLine, ROIZone } from '../types';
+import { DetectionConfig, CountingLine, ROIZone } from '../types';
 import { Sliders, Cpu, Eye, Palette, Trash2, Plus, ShieldAlert, Sparkles, Activity } from 'lucide-react';
 
 interface ControlsSidebarProps {
@@ -21,39 +21,6 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
   setRoiZones,
   onResetCounts,
 }) => {
-  const modelOptions: { id: ModelOption; label: string; desc: string; badge: string }[] = [
-    {
-      id: 'yolov8n',
-      label: 'YOLOv8 Nano (yolov8n)',
-      desc: 'Mais leve e ultrarrápido (>60 FPS). Ideal para qualquer dispositivo.',
-      badge: 'Recomendado',
-    },
-    {
-      id: 'yolov8s',
-      label: 'YOLOv8 Small (yolov8s)',
-      desc: 'Alta precisão e velocidade balanceada (45 FPS).',
-      badge: 'Balanceado',
-    },
-    {
-      id: 'yolov8m',
-      label: 'YOLOv8 Medium (yolov8m)',
-      desc: 'Máxima precisão para multidões e objetos sobrepostos.',
-      badge: 'Alta Precisão',
-    },
-    {
-      id: 'yolov8-pose',
-      label: 'YOLOv8 Pose / Esqueleto',
-      desc: 'Estimativa de pose e pontos de articulação (Keypoint detection).',
-      badge: 'Pose 2D',
-    },
-    {
-      id: 'yolov8-world',
-      label: 'YOLOv8 World (Zero-Shot)',
-      desc: 'Detecção aberta com vocabulário dinâmico.',
-      badge: 'Avançado',
-    },
-  ];
-
   const colorPalette = [
     { name: 'Verde Neon', hex: '#00FF66' },
     { name: 'Ciano Cyber', hex: '#00E5FF' },
@@ -85,26 +52,14 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
           <Cpu className="w-4 h-4 text-emerald-400" />
           <span>Modelo YOLOv8</span>
         </label>
-        <div className="space-y-2">
-          {modelOptions.map((opt) => (
-            <button
-              key={opt.id}
-              onClick={() => setConfig((prev) => ({ ...prev, selectedModel: opt.id }))}
-              className={`w-full text-left p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                config.selectedModel === opt.id
-                  ? 'bg-emerald-500/10 border-emerald-500/60 text-white shadow-md shadow-emerald-950/40'
-                  : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-100">{opt.label}</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-emerald-500/30">
-                  {opt.badge}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">{opt.desc}</p>
-            </button>
-          ))}
+        <div className="rounded-xl border border-emerald-500/60 bg-emerald-500/10 p-3 shadow-md shadow-emerald-950/40">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-100">YOLOv8 Nano (yolov8n)</span>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-emerald-500/30">
+              Ativo
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">Modelo fixo, leve e otimizado para detecção em tempo real.</p>
         </div>
       </div>
 

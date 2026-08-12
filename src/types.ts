@@ -1,9 +1,4 @@
-export type ModelOption = 
-  | 'yolov8n' 
-  | 'yolov8s' 
-  | 'yolov8m' 
-  | 'yolov8-pose' 
-  | 'yolov8-world';
+export type ModelOption = 'yolov8n';
 
 export type VideoSourceType = 'file' | 'webcam' | 'sample';
 

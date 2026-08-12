@@ -26,6 +26,7 @@ export default function App() {
   const [sampleVideos, setSampleVideos] = useState<SampleVideo[]>([]);
   const [selectedSample, setSelectedSample] = useState<SampleVideo | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadedVideoUrlRef = useRef<string | null>(null);
 
   // Vision Config State
   const [config, setConfig] = useState<DetectionConfig>({
@@ -84,7 +85,11 @@ export default function App() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (uploadedVideoUrlRef.current) {
+        URL.revokeObjectURL(uploadedVideoUrlRef.current);
+      }
       const url = URL.createObjectURL(file);
+      uploadedVideoUrlRef.current = url;
       setVideoUrl(url);
       setVideoSourceType('file');
       setSelectedSample(null);
@@ -94,11 +99,24 @@ export default function App() {
 
   // Select Sample Video
   const handleSelectSample = (sample: SampleVideo) => {
+    if (uploadedVideoUrlRef.current) {
+      URL.revokeObjectURL(uploadedVideoUrlRef.current);
+      uploadedVideoUrlRef.current = null;
+    }
     setSelectedSample(sample);
     setVideoUrl(sample.url);
     setVideoSourceType('sample');
     resetMetrics();
   };
+
+  // Libera o Blob URL do vídeo enviado quando a aplicação é desmontada.
+  useEffect(() => {
+    return () => {
+      if (uploadedVideoUrlRef.current) {
+        URL.revokeObjectURL(uploadedVideoUrlRef.current);
+      }
+    };
+  }, []);
 
   // Reset Metrics
   const resetMetrics = () => {
@@ -212,7 +230,8 @@ export default function App() {
           alerts,
         };
 
-        setLogs((prev) => [...prev, newLog]);
+        // Mantém apenas os eventos mais recentes para evitar crescimento indefinido.
+        setLogs((prev) => [...prev, newLog].slice(-500));
       }
     },
     [config.alertThreshold, roiZones.length, totalLineIn, totalLineOut]

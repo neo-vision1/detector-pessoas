@@ -88,6 +88,24 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   // Heatmap accumulator canvas
   const heatmapDataRef = useRef<number[][] | null>(null);
 
+  // Referências estáveis impedem que atualizações de métricas recriem o loop de inferência.
+  const configRef = useRef(config);
+  const countingLinesRef = useRef(countingLines);
+  const roiZonesRef = useRef(roiZones);
+  const onDetectionUpdateRef = useRef(onDetectionUpdate);
+  const frameRequestRef = useRef<number | null>(null);
+  const isLoopActiveRef = useRef(false);
+  const isInferenceRunningRef = useRef(false);
+  const lastParentUpdateRef = useRef(0);
+  const lastPlaybackUiUpdateRef = useRef(0);
+
+  useEffect(() => {
+    configRef.current = config;
+    countingLinesRef.current = countingLines;
+    roiZonesRef.current = roiZones;
+    onDetectionUpdateRef.current = onDetectionUpdate;
+  }, [config, countingLines, roiZones, onDetectionUpdate]);
+
   // Load Model on Mount
   useEffect(() => {
     let isMounted = true;
@@ -145,100 +163,99 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     }
   }, [videoSourceType]);
 
-  // Main Detection Loop
+  // Main Detection Loop. Mantém exatamente uma animação e uma inferência ativas.
   const processFrame = useCallback(async () => {
+    if (!isLoopActiveRef.current || isInferenceRunningRef.current) return;
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || video.paused || video.ended || video.readyState < 2) {
-      if (isPlaying) {
-        requestAnimationFrame(processFrame);
+      if (isLoopActiveRef.current) {
+        frameRequestRef.current = requestAnimationFrame(processFrame);
       }
       return;
     }
 
-    // Adjust canvas dimensions to match video element
-    const width = video.videoWidth || 1280;
-    const height = video.videoHeight || 720;
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
-    }
+    isInferenceRunningRef.current = true;
+    try {
+      const width = video.videoWidth || 1280;
+      const height = video.videoHeight || 720;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, width, height);
 
-    // Draw raw video frame onto canvas
-    ctx.drawImage(video, 0, 0, width, height);
+      const now = performance.now();
+      const delta = now - lastFrameTimeRef.current;
+      frameCountRef.current++;
+      if (delta >= 1000) {
+        fpsRef.current = Math.round((frameCountRef.current * 1000) / delta);
+        frameCountRef.current = 0;
+        lastFrameTimeRef.current = now;
+      }
 
-    // Calculate FPS
-    const now = performance.now();
-    const delta = now - lastFrameTimeRef.current;
-    frameCountRef.current++;
-    if (delta >= 1000) {
-      fpsRef.current = Math.round((frameCountRef.current * 1000) / delta);
-      frameCountRef.current = 0;
-      lastFrameTimeRef.current = now;
-    }
+      let detectedPersons: DetectedPerson[] = [];
+      let crossings: { lineId: string; direction: 'in' | 'out' }[] = [];
+      let violations: string[] = [];
+      const activeConfig = configRef.current;
+      const activeLines = countingLinesRef.current;
+      const activeRois = roiZonesRef.current;
 
-    // Run Detection if Model Loaded
-    let detectedPersons: DetectedPerson[] = [];
-    let crossings: { lineId: string; direction: 'in' | 'out' }[] = [];
-    let violations: string[] = [];
-
-    if (modelRef.current) {
-      try {
-        const predictions = await modelRef.current.detect(video, 20, config.confidenceThreshold);
-
-        // Filter for persons
+      if (modelRef.current) {
+        const predictions = await modelRef.current.detect(video, 20, activeConfig.confidenceThreshold);
         const personDetections = predictions
-          .filter((pred) => pred.class === 'person' && pred.score >= config.confidenceThreshold)
-          .map((pred) => {
-            return {
-              bbox: pred.bbox as [number, number, number, number],
-              score: pred.score,
-              class: 'Pessoa',
-            };
-          });
+          .filter((pred) => pred.class === 'person' && pred.score >= activeConfig.confidenceThreshold)
+          .map((pred) => ({
+            bbox: pred.bbox as [number, number, number, number],
+            score: pred.score,
+            class: 'Pessoa',
+          }));
 
-        // Update Tracker
-        const trackerResult = trackerRef.current.update(
-          personDetections,
-          width,
-          height,
-          countingLines,
-          roiZones
-        );
-
+        const trackerResult = trackerRef.current.update(personDetections, width, height, activeLines, activeRois);
         detectedPersons = trackerResult.tracked;
         crossings = trackerResult.lineCrossings;
         violations = trackerResult.roiViolations;
+        renderVisuals(ctx, width, height, detectedPersons, activeLines, activeRois);
+      }
 
-        // Render Bounding Boxes & Tracking Visuals
-        renderVisuals(ctx, width, height, detectedPersons, countingLines, roiZones);
-      } catch (err) {
-        console.error('Inference error:', err);
+      // Métricas não precisam disparar renderizações na velocidade máxima da inferência.
+      if (now - lastParentUpdateRef.current >= 100 || crossings.length > 0) {
+        onDetectionUpdateRef.current(detectedPersons, crossings, violations, fpsRef.current);
+        lastParentUpdateRef.current = now;
+      }
+
+      // Controles de reprodução são atualizados quatro vezes por segundo.
+      if (now - lastPlaybackUiUpdateRef.current >= 250) {
+        setCurrentTime(video.currentTime);
+        setDuration(video.duration || 0);
+        lastPlaybackUiUpdateRef.current = now;
+      }
+    } catch (err) {
+      console.error('Inference error:', err);
+    } finally {
+      isInferenceRunningRef.current = false;
+      if (isLoopActiveRef.current) {
+        frameRequestRef.current = requestAnimationFrame(processFrame);
       }
     }
+  }, []);
 
-    // Update parent state
-    onDetectionUpdate(detectedPersons, crossings, violations, fpsRef.current);
-
-    // Update current timestamp
-    setCurrentTime(video.currentTime);
-    setDuration(video.duration || 0);
-
-    // Schedule next frame
-    if (isPlaying) {
-      requestAnimationFrame(processFrame);
-    }
-  }, [isPlaying, config, countingLines, roiZones, onDetectionUpdate]);
-
-  // Trigger loop on play state change
+  // Trigger a single lifecycle-managed loop only when playback changes.
   useEffect(() => {
-    if (isPlaying) {
-      const handle = requestAnimationFrame(processFrame);
-      return () => cancelAnimationFrame(handle);
-    }
+    if (!isPlaying) return;
+    isLoopActiveRef.current = true;
+    processFrame();
+    return () => {
+      isLoopActiveRef.current = false;
+      if (frameRequestRef.current !== null) {
+        cancelAnimationFrame(frameRequestRef.current);
+        frameRequestRef.current = null;
+      }
+    };
   }, [isPlaying, processFrame]);
 
   // Render Visual Overlays on Canvas
@@ -251,7 +268,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     rois: ROIZone[]
   ) => {
     // 1. Draw Heatmap if enabled
-    if (config.showHeatmap) {
+    if (configRef.current.showHeatmap) {
       ctx.fillStyle = 'rgba(0, 255, 100, 0.08)';
       persons.forEach((p) => {
         const grad = ctx.createRadialGradient(p.centroid.x, p.centroid.y, 10, p.centroid.x, p.centroid.y, 90);
@@ -342,7 +359,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     // 4. Draw Persons Bounding Boxes
     persons.forEach((person) => {
       const [x, y, w, h] = person.bbox;
-      const boxColor = config.boxColor || '#00FF66';
+      const boxColor = configRef.current.boxColor || '#00FF66';
 
       ctx.save();
 
@@ -363,7 +380,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       ctx.strokeRect(x, y, w, h);
 
       // Motion Trails
-      if (config.showMotionTrails && person.trail.length > 1) {
+      if (configRef.current.showMotionTrails && person.trail.length > 1) {
         ctx.beginPath();
         ctx.moveTo(person.trail[0].x, person.trail[0].y);
         for (let i = 1; i < person.trail.length; i++) {
@@ -377,7 +394,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       }
 
       // Pose Skeleton Keypoints
-      if (config.showPoseKeypoints && person.keypoints) {
+      if (configRef.current.showPoseKeypoints && person.keypoints) {
         person.keypoints.forEach((kp) => {
           ctx.fillStyle = '#00E5FF';
           ctx.beginPath();
@@ -387,11 +404,11 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       }
 
       // Label Header Badge above box
-      if (config.showLabels || config.showConfidence || config.showTrackingId) {
+      if (configRef.current.showLabels || configRef.current.showConfidence || configRef.current.showTrackingId) {
         const labelParts: string[] = [];
-        if (config.showTrackingId) labelParts.push(`#${person.id}`);
-        if (config.showLabels) labelParts.push('Pessoa');
-        if (config.showConfidence) labelParts.push(`${(person.score * 100).toFixed(1)}%`);
+        if (configRef.current.showTrackingId) labelParts.push(`#${person.id}`);
+        if (configRef.current.showLabels) labelParts.push('Pessoa');
+        if (configRef.current.showConfidence) labelParts.push(`${(person.score * 100).toFixed(1)}%`);
 
         const labelText = labelParts.join(' | ');
         ctx.font = 'bold 12px Inter, monospace';

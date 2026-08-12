@@ -151,29 +151,38 @@ export default function App() {
         return nextSet;
       });
 
-      // Handle Line Crossings
+      // Agrupa cruzamentos do mesmo frame em uma única atualização de estado.
       if (lineCrossings.length > 0) {
-        lineCrossings.forEach((cross) => {
-          if (cross.direction === 'in') {
-            setTotalLineIn((prev) => prev + 1);
-          } else {
-            setTotalLineOut((prev) => prev + 1);
-          }
+        const incrementsByLine = new Map<string, { in: number; out: number }>();
+        let totalIncrementsIn = 0;
+        let totalIncrementsOut = 0;
 
-          // Update specific line counter
-          setCountingLines((prevLines) =>
-            prevLines.map((line) => {
-              if (line.id === cross.lineId) {
-                return {
-                  ...line,
-                  countIn: cross.direction === 'in' ? line.countIn + 1 : line.countIn,
-                  countOut: cross.direction === 'out' ? line.countOut + 1 : line.countOut,
-                };
-              }
-              return line;
-            })
-          );
-        });
+        for (const crossing of lineCrossings) {
+          const increment = incrementsByLine.get(crossing.lineId) ?? { in: 0, out: 0 };
+          increment[crossing.direction] += 1;
+          incrementsByLine.set(crossing.lineId, increment);
+          if (crossing.direction === 'in') totalIncrementsIn += 1;
+          else totalIncrementsOut += 1;
+        }
+
+        if (totalIncrementsIn > 0) {
+          setTotalLineIn((previous) => previous + totalIncrementsIn);
+        }
+        if (totalIncrementsOut > 0) {
+          setTotalLineOut((previous) => previous + totalIncrementsOut);
+        }
+
+        setCountingLines((previousLines) =>
+          previousLines.map((line) => {
+            const increment = incrementsByLine.get(line.id);
+            if (!increment) return line;
+            return {
+              ...line,
+              countIn: line.countIn + increment.in,
+              countOut: line.countOut + increment.out,
+            };
+          })
+        );
       }
 
       // Atualiza as zonas somente quando seu estado visual realmente mudar.

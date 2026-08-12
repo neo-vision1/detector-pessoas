@@ -21,8 +21,8 @@ interface CachedRoi {
 }
 
 interface GeometryCache {
-  linesRef: CountingLine[];
-  roisRef: ROIZone[];
+  lineSignature: string;
+  roiSignature: string;
   width: number;
   height: number;
   lines: CachedLine[];
@@ -34,6 +34,7 @@ export class SimpleCentroidTracker {
   private maxDisappearedFrames = 15;
   private maxDistanceThreshold = 80;
   private readonly roiCheckIntervalMs = 120;
+  private readonly lineCrossingCooldownMs = 450;
   private trackedObjects: Map<number, {
     person: DetectedPerson;
     disappearedFrames: number;
@@ -41,6 +42,7 @@ export class SimpleCentroidTracker {
   private geometryCache: GeometryCache | null = null;
   private lastRoiCheckAt = 0;
   private lastRoiViolations: string[] = [];
+  private lastLineCrossingAt = new Map<string, number>();
 
   public update(
     rawDetections: Array<{ bbox: [number, number, number, number]; score: number; class: string; keypoints?: Keypoint[] }>,
@@ -134,7 +136,15 @@ export class SimpleCentroidTracker {
         for (const line of geometry.lines) {
           if (!this.segmentMayTouchBounds(prevCentroid, newCentroid, line.bounds)) continue;
           const direction = this.checkLineIntersection(prevCentroid, newCentroid, line.p1, line.p2);
-          if (direction) lineCrossings.push({ lineId: line.id, direction });
+          if (!direction) continue;
+
+          // Evita contagens em cascata quando a detecção oscila sobre a mesma linha.
+          const crossingKey = `${item.existingId}:${line.id}`;
+          const now = performance.now();
+          const lastCrossingAt = this.lastLineCrossingAt.get(crossingKey) ?? -Infinity;
+          if (now - lastCrossingAt < this.lineCrossingCooldownMs) continue;
+          this.lastLineCrossingAt.set(crossingKey, now);
+          lineCrossings.push({ lineId: line.id, direction });
         }
       }
 
@@ -144,6 +154,9 @@ export class SimpleCentroidTracker {
         trackedObject.disappearedFrames += 1;
         if (trackedObject.disappearedFrames > this.maxDisappearedFrames) {
           this.trackedObjects.delete(id);
+          for (const line of geometry.lines) {
+            this.lastLineCrossingAt.delete(`${id}:${line.id}`);
+          }
         }
       }
 
@@ -192,8 +205,14 @@ export class SimpleCentroidTracker {
     width: number,
     height: number
   ): GeometryCache {
+    const lineSignature = lines
+      .map((line) => `${line.id}:${line.p1.x},${line.p1.y},${line.p2.x},${line.p2.y}`)
+      .join('|');
+    const roiSignature = rois
+      .map((roi) => `${roi.id}:${roi.points.map((point) => `${point.x},${point.y}`).join(';')}`)
+      .join('|');
     const cache = this.geometryCache;
-    if (cache && cache.linesRef === lines && cache.roisRef === rois && cache.width === width && cache.height === height) {
+    if (cache && cache.lineSignature === lineSignature && cache.roiSignature === roiSignature && cache.width === width && cache.height === height) {
       return cache;
     }
 
@@ -211,8 +230,8 @@ export class SimpleCentroidTracker {
       });
 
     this.geometryCache = {
-      linesRef: lines,
-      roisRef: rois,
+      lineSignature,
+      roiSignature,
       width,
       height,
       lines: cachedLines,
@@ -296,5 +315,6 @@ export class SimpleCentroidTracker {
     this.geometryCache = null;
     this.lastRoiCheckAt = 0;
     this.lastRoiViolations = [];
+    this.lastLineCrossingAt.clear();
   }
 }

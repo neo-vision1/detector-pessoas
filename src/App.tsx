@@ -176,15 +176,20 @@ export default function App() {
         });
       }
 
-      // Update ROI violation state
+      // Atualiza as zonas somente quando seu estado visual realmente mudar.
+      // Assim, a referência da configuração permanece estável entre os frames.
       if (roiZones.length > 0) {
         const violatedSet = new Set(roiViolations);
-        setRoiZones((prevZones) =>
-          prevZones.map((z) => ({
-            ...z,
-            isViolated: violatedSet.has(z.id),
-          }))
-        );
+        setRoiZones((prevZones) => {
+          let changed = false;
+          const nextZones = prevZones.map((zone) => {
+            const isViolated = violatedSet.has(zone.id);
+            if (zone.isViolated === isViolated) return zone;
+            changed = true;
+            return { ...zone, isViolated };
+          });
+          return changed ? nextZones : prevZones;
+        });
       }
 
       // Record telemetry chart point periodically (every 1.5 seconds)

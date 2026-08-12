@@ -1,0 +1,6 @@
+{
+  "name": "YOLOv8 Person Detector",
+  "description": "Software de visão computacional em tempo real com YOLOv8 para detecção, contagem e rastreamento de pessoas em vídeos.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

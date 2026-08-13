@@ -1,0 +1,6 @@
+.env
+/data/
+*.key
+*.crt
+caddy_data/
+caddy_config/

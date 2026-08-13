@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import '@tensorflow/tfjs';
+import Hls from 'hls.js';
 import {
   DetectionConfig,
   VideoSourceType,
@@ -33,6 +34,8 @@ import {
 interface VideoCanvasPlayerProps {
   videoUrl: string | null;
   videoSourceType: VideoSourceType;
+  ipCameraAccessUsername?: string;
+  ipCameraAccessPassword?: string;
   config: DetectionConfig;
   countingLines: CountingLine[];
   setCountingLines: React.Dispatch<React.SetStateAction<CountingLine[]>>;
@@ -50,6 +53,8 @@ interface VideoCanvasPlayerProps {
 export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   videoUrl,
   videoSourceType,
+  ipCameraAccessUsername,
+  ipCameraAccessPassword,
   config,
   countingLines,
   setCountingLines,
@@ -162,6 +167,59 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       }
     }
   }, [videoSourceType]);
+
+  // HLS é o formato entregue pelo gateway; o navegador nunca recebe o RTSP da câmera.
+  useEffect(() => {
+    if (videoSourceType !== 'ip-camera' || !videoUrl || !videoRef.current) return;
+
+    const video = videoRef.current;
+    let hls: Hls | null = null;
+    let cancelled = false;
+    const startPlayback = () => {
+      if (cancelled) return;
+      video.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => setModelError('O navegador bloqueou a reprodução automática. Clique em Play para iniciar a câmera.'));
+    };
+
+    setModelError(null);
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = videoUrl;
+      video.addEventListener('loadedmetadata', startPlayback, { once: true });
+    } else if (Hls.isSupported()) {
+      hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        backBufferLength: 30,
+        xhrSetup: ipCameraAccessUsername && ipCameraAccessPassword
+          ? (xhr) => {
+              const credentials = btoa(`${ipCameraAccessUsername}:${ipCameraAccessPassword}`);
+              xhr.setRequestHeader('Authorization', `Basic ${credentials}`);
+            }
+          : undefined,
+      });
+      hls.loadSource(videoUrl);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal && !cancelled) {
+          setModelError('Não foi possível abrir o stream HLS. Verifique o gateway, HTTPS e as permissões de acesso.');
+        }
+      });
+    } else {
+      setModelError('Este navegador não oferece suporte a HLS. Use uma versão atualizada do Chrome, Edge, Firefox ou Safari.');
+    }
+
+    return () => {
+      cancelled = true;
+      video.pause();
+      video.removeEventListener('loadedmetadata', startPlayback);
+      if (hls) hls.destroy();
+      video.removeAttribute('src');
+      video.load();
+      setIsPlaying(false);
+    };
+  }, [videoSourceType, videoUrl, ipCameraAccessUsername, ipCameraAccessPassword]);
 
   // Main Detection Loop. Mantém exatamente uma animação e uma inferência ativas.
   const processFrame = useCallback(async () => {
@@ -603,7 +661,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       {/* Hidden Video Source */}
       <video
         ref={videoRef}
-        src={videoSourceType !== 'webcam' ? videoUrl || undefined : undefined}
+        src={videoSourceType !== 'webcam' && videoSourceType !== 'ip-camera' ? videoUrl || undefined : undefined}
         crossOrigin="anonymous"
         muted={isMuted}
         loop
@@ -716,7 +774,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       {/* Player Controls Bar */}
       <div className="bg-slate-950 border-t border-slate-800 p-3 space-y-2">
         {/* Seek Bar (For File / Sample videos) */}
-        {videoSourceType !== 'webcam' && (
+        {videoSourceType !== 'webcam' && videoSourceType !== 'ip-camera' && (
           <div className="flex items-center space-x-3 px-1">
             <span className="text-[11px] font-mono text-slate-400 w-12 text-right">
               {formatTime(currentTime)}

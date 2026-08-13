@@ -11,6 +11,7 @@ interface NavbarProps {
   onOpenSamplePicker: () => void;
   onOpenAiModal: () => void;
   onUploadClick: () => void;
+  onOpenIPCamera: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -22,6 +23,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSamplePicker,
   onOpenAiModal,
   onUploadClick,
+  onOpenIPCamera,
 }) => {
   return (
     <header className="bg-slate-950 border-b border-slate-800 text-slate-100 px-4 py-3 sticky top-0 z-40 shadow-xl">
@@ -70,6 +72,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Upload className="w-3.5 h-3.5 text-emerald-400" />
             <span>Upload de Vídeo</span>
+          </button>
+
+          {/* IP Camera Button */}
+          <button
+            onClick={onOpenIPCamera}
+            className={`flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${
+              videoSourceType === 'ip-camera'
+                ? 'bg-cyan-500/15 border-cyan-500/50 text-cyan-300 shadow-md shadow-cyan-950/50'
+                : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Câmera IP</span>
           </button>
 
           {/* Webcam Button */}

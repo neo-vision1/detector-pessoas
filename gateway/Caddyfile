@@ -1,0 +1,10 @@
+{$STREAM_DOMAIN} {
+  encode gzip
+
+  # O MediaMTX permanece sem portas públicas; apenas o HLS passa pelo HTTPS.
+  handle_path /camera/* {
+    reverse_proxy mediamtx:8888
+  }
+
+  respond /health 200
+}

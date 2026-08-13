@@ -1,6 +1,13 @@
 export type ModelOption = 'yolov8n';
 
-export type VideoSourceType = 'file' | 'webcam' | 'sample';
+export type VideoSourceType = 'file' | 'webcam' | 'sample' | 'ip-camera';
+
+export interface IPCameraConfig {
+  name: string;
+  hlsUrl: string;
+  accessUsername?: string;
+  accessPassword?: string;
+}
 
 export interface SampleVideo {
   id: string;

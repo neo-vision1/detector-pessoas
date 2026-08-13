@@ -8,6 +8,7 @@ import {
   DetectedPerson,
   DetectionLogItem,
   ChartDataPoint,
+  IPCameraConfig,
 } from './types';
 import { Navbar } from './components/Navbar';
 import { VideoCanvasPlayer } from './components/VideoCanvasPlayer';
@@ -17,6 +18,7 @@ import { AnalyticsSection } from './components/AnalyticsSection';
 import { DetectionLogTable } from './components/DetectionLogTable';
 import { AIInspectorModal } from './components/AIInspectorModal';
 import { SampleVideoPicker } from './components/SampleVideoPicker';
+import { IPCameraModal } from './components/IPCameraModal';
 import { ShieldAlert, Cpu, Sparkles, Upload, FileVideo } from 'lucide-react';
 
 export default function App() {
@@ -25,6 +27,7 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [sampleVideos, setSampleVideos] = useState<SampleVideo[]>([]);
   const [selectedSample, setSelectedSample] = useState<SampleVideo | null>(null);
+  const [ipCameraConfig, setIpCameraConfig] = useState<IPCameraConfig | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadedVideoUrlRef = useRef<string | null>(null);
 
@@ -62,6 +65,7 @@ export default function App() {
 
   // Modals
   const [isSampleModalOpen, setIsSampleModalOpen] = useState<boolean>(false);
+  const [isIpCameraModalOpen, setIsIpCameraModalOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
 
   // Canvas Ref callback helper for AI modal
@@ -104,8 +108,17 @@ export default function App() {
       uploadedVideoUrlRef.current = null;
     }
     setSelectedSample(sample);
+    setIpCameraConfig(null);
     setVideoUrl(sample.url);
     setVideoSourceType('sample');
+    resetMetrics();
+  };
+
+  const handleConnectIPCamera = (camera: IPCameraConfig) => {
+    setIpCameraConfig(camera);
+    setSelectedSample(null);
+    setVideoUrl(camera.hlsUrl);
+    setVideoSourceType('ip-camera');
     resetMetrics();
   };
 
@@ -290,6 +303,7 @@ export default function App() {
         onOpenSamplePicker={() => setIsSampleModalOpen(true)}
         onOpenAiModal={() => setIsAiModalOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
+        onOpenIPCamera={() => setIsIpCameraModalOpen(true)}
       />
 
       {/* Main Container */}
@@ -326,6 +340,8 @@ export default function App() {
             <VideoCanvasPlayer
               videoUrl={videoUrl}
               videoSourceType={videoSourceType}
+              ipCameraAccessUsername={ipCameraConfig?.accessUsername}
+              ipCameraAccessPassword={ipCameraConfig?.accessPassword}
               config={config}
               countingLines={countingLines}
               setCountingLines={setCountingLines}
@@ -380,6 +396,12 @@ export default function App() {
       </footer>
 
       {/* Sample Videos Picker Modal */}
+      <IPCameraModal
+        isOpen={isIpCameraModalOpen}
+        onClose={() => setIsIpCameraModalOpen(false)}
+        onConnect={handleConnectIPCamera}
+      />
+
       <SampleVideoPicker
         isOpen={isSampleModalOpen}
         onClose={() => setIsSampleModalOpen(false)}

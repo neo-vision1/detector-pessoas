@@ -202,9 +202,31 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
       hls.on(Hls.Events.ERROR, (_event, data) => {
-        if (data.fatal && !cancelled) {
-          setModelError('Não foi possível abrir o stream HLS. Verifique o gateway, HTTPS e as permissões de acesso.');
+        if (cancelled || !data.fatal) return;
+
+        console.warn('Falha HLS:', {
+          type: data.type,
+          details: data.details,
+          responseCode: data.response?.code,
+          url: data.url,
+        });
+
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          setModelError('Conexão HLS interrompida; tentando reconectar…');
+          hls?.startLoad();
+          return;
         }
+
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          setModelError('O navegador encontrou um erro no segmento HLS; recuperando a reprodução…');
+          hls?.recoverMediaError();
+          return;
+        }
+
+        setModelError(
+          `Não foi possível abrir o HLS (${data.details || data.type}). Verifique se o gateway está transmitindo.`
+        );
+        hls?.destroy();
       });
     } else {
       setModelError('Este navegador não oferece suporte a HLS. Use uma versão atualizada do Chrome, Edge, Firefox ou Safari.');

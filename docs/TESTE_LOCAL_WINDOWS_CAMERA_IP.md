@@ -68,7 +68,7 @@ notepad .env
 No Bloco de Notas, substitua os valores de exemplo. O campo mais importante é `CAMERA_RTSP_URL`. Exemplo de estrutura:
 
 ```env
-APP_ORIGIN=http://localhost:5173
+APP_ORIGIN=http://localhost:3000
 CAMERA_RTSP_URL=rtsp://USUARIO:SENHA@192.168.1.50:554/CAMINHO_DO_STREAM
 STREAM_USER_1=teste
 STREAM_PASS_1=crie-uma-senha-de-teste
@@ -123,7 +123,7 @@ pnpm install
 pnpm dev
 ```
 
-Abra o endereço exibido pelo comando, normalmente `http://localhost:5173`. No cabeçalho do software:
+Abra o endereço exibido pelo comando, normalmente `http://localhost:3000`. No cabeçalho do software:
 
 1. Clique em **Câmera IP**.
 2. Informe um nome para a câmera.
@@ -148,7 +148,7 @@ Se o vídeo abrir no canvas e a detecção começar, o teste local foi aprovado.
 | O container inicia, mas não há imagem | Abra os logs do MediaMTX e compare a URL RTSP com a que funcionou no VLC. |
 | `401 Unauthorized` | Use o usuário/senha `STREAM_USER_*` do `.env`, não a conta da câmera. |
 | `404` na URL HLS | Use exatamente `/intelbras/index.m3u8` e mantenha o nome de stream configurado. |
-| O software abre, mas não exibe vídeo | Confirme que ele está em `http://localhost:5173` e que `APP_ORIGIN` tem esse mesmo valor. |
+| O software abre, mas não exibe vídeo | Confirme que ele está em `http://localhost:3000` e que `APP_ORIGIN` tem esse mesmo valor. |
 | Porta 8888 em uso | Feche o serviço que utiliza a porta ou altere o mapeamento em `docker-compose.local.yml`. |
 
 ## Depois do teste

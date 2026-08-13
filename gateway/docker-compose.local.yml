@@ -1,0 +1,8 @@
+services:
+  mediamtx:
+    ports:
+      - "127.0.0.1:8888:8888"
+
+  caddy:
+    profiles:
+      - remote-only

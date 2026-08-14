@@ -104,7 +104,7 @@ hls: true
 hlsAddress: :8888
 hlsVariant: lowLatency
 hlsAlwaysRemux: true
-hlsSegmentCount: 3
+hlsSegmentCount: 7
 hlsSegmentDuration: 1s
 hlsPartDuration: 100ms
 

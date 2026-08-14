@@ -13,7 +13,8 @@ services:
       # Mantém o HLS pronto e reduz o tempo de espera no primeiro frame.
       MTX_HLSALWAYSREMUX: "yes"
       # Playlist curta evita acumular histórico; a latência é controlada pelo player.
-      MTX_HLSSEGMENTCOUNT: "3"
+      # Low-Latency HLS exige pelo menos 7 segmentos no MediaMTX.
+      MTX_HLSSEGMENTCOUNT: "7"
       MTX_HLSSEGMENTDURATION: "1s"
       MTX_HLSPARTDURATION: "100ms"
       MTX_HLSALLOWORIGINS: ${APP_ORIGIN}

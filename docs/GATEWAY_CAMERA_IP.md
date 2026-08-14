@@ -72,7 +72,7 @@ A configuração do gateway agora usa Low-Latency HLS com playlist curta e remux
 |---|---:|---|
 | `hlsVariant` | `lowLatency` | Usar Low-Latency HLS. |
 | `hlsAlwaysRemux` | `true` | Evitar espera extra para preparar o muxer após a solicitação. |
-| `hlsSegmentCount` | `3` | Manter uma playlist curta. |
+| `hlsSegmentCount` | `7` | Mínimo exigido pelo Low-Latency HLS do MediaMTX; não é o parâmetro principal de latência. |
 | `hlsSegmentDuration` | `1s` | Limitar a duração-alvo dos segmentos. |
 | `hlsPartDuration` | `100ms` | Permitir partes menores no modo de baixa latência. |
 | `lowLatencyMode` do hls.js | `true` | Fazer o navegador perseguir o live edge. |

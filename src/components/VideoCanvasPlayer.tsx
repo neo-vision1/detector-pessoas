@@ -241,6 +241,9 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   const lastPoseInferenceAtRef = useRef(0);
   const lastPoseResultsRef = useRef<PoseResult[]>([]);
   const trackerRef = useRef<SimpleCentroidTracker>(new SimpleCentroidTracker());
+  const lastDetectionAtRef = useRef(0);
+  const lastTrackedPersonsRef = useRef<DetectedPerson[]>([]);
+  const lastViolationsRef = useRef<string[]>([]);
 
   // State
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
@@ -543,36 +546,52 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       const activeRois = roiZonesRef.current;
 
       if (modelRef.current) {
-        const predictions = await modelRef.current.detect(video, 20, activeConfig.confidenceThreshold);
-        const personDetections: PoseDetectionInput[] = predictions
-          .filter((pred) => pred.class === 'person' && pred.score >= activeConfig.confidenceThreshold)
-          .map((pred) => ({
-            bbox: pred.bbox as [number, number, number, number],
-            score: pred.score,
-            class: 'Pessoa',
-            posture: 'unknown',
-          }));
+        // A reprodução continua em todos os frames, mas a inferência pesada é
+        // limitada a aproximadamente 8 Hz (ou 5,5 Hz em máquinas já lentas).
+        const detectionIntervalMs = fpsRef.current > 0 && fpsRef.current < 20 ? 180 : 120;
+        const shouldRunDetection = now - lastDetectionAtRef.current >= detectionIntervalMs;
 
-        // A pose roda por intervalo de tempo: aproximadamente 3 Hz com uma
-        // pessoa e 2 Hz com várias pessoas, sem bloquear o detector principal.
-        if (personDetections.length === 0) lastPoseResultsRef.current = [];
-        const poseIntervalMs = personDetections.length > 2 ? 450 : 320;
-        const shouldRunPose =
-          lastPoseResultsRef.current.length === 0 || now - lastPoseInferenceAtRef.current >= poseIntervalMs;
-        if (shouldRunPose) lastPoseInferenceAtRef.current = now;
-        const poseUpdate = await enrichWithPose(
-          poseDetectorRef.current,
-          video,
-          personDetections,
-          lastPoseResultsRef.current,
-          shouldRunPose
-        );
-        lastPoseResultsRef.current = poseUpdate.results;
+        if (shouldRunDetection) {
+          lastDetectionAtRef.current = now;
+          const predictions = await modelRef.current.detect(video, 20, activeConfig.confidenceThreshold);
+          const personDetections: PoseDetectionInput[] = predictions
+            .filter((pred) => pred.class === 'person' && pred.score >= activeConfig.confidenceThreshold)
+            .map((pred) => ({
+              bbox: pred.bbox as [number, number, number, number],
+              score: pred.score,
+              class: 'Pessoa',
+              posture: 'unknown',
+            }));
 
-        const trackerResult = trackerRef.current.update(poseUpdate.detections, width, height, activeLines, activeRois);
-        detectedPersons = trackerResult.tracked;
-        crossings = trackerResult.lineCrossings;
-        violations = trackerResult.roiViolations;
+          // A pose também é adaptativa: aproximadamente 3 Hz com uma pessoa
+          // e 2 Hz com várias pessoas, sem bloquear o detector principal.
+          if (personDetections.length === 0) lastPoseResultsRef.current = [];
+          const poseIntervalMs = personDetections.length > 2 ? 450 : 320;
+          const shouldRunPose =
+            lastPoseResultsRef.current.length === 0 || now - lastPoseInferenceAtRef.current >= poseIntervalMs;
+          if (shouldRunPose) lastPoseInferenceAtRef.current = now;
+          const poseUpdate = await enrichWithPose(
+            poseDetectorRef.current,
+            video,
+            personDetections,
+            lastPoseResultsRef.current,
+            shouldRunPose
+          );
+          lastPoseResultsRef.current = poseUpdate.results;
+
+          const trackerResult = trackerRef.current.update(poseUpdate.detections, width, height, activeLines, activeRois);
+          lastTrackedPersonsRef.current = trackerResult.tracked;
+          lastViolationsRef.current = trackerResult.roiViolations;
+          detectedPersons = trackerResult.tracked;
+          crossings = trackerResult.lineCrossings;
+          violations = trackerResult.roiViolations;
+        } else {
+          detectedPersons = lastTrackedPersonsRef.current;
+          violations = lastViolationsRef.current;
+        }
+
+        // O canvas acompanha o vídeo, mas usa o último resultado quando a
+        // inferência está em espera.
         renderVisuals(ctx, width, height, detectedPersons, activeLines, activeRois);
       }
 
@@ -780,7 +799,6 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         if (configRef.current.showConfidence) labelParts.push(`${(person.score * 100).toFixed(1)}%`);
         if (person.posture === 'standing') labelParts.push('EM PÉ');
         if (person.posture === 'fallen') labelParts.push('CAÍDA');
-        if (person.bodyAspectRatio && person.bodyAspectRatio > 0) labelParts.push(`R:${person.bodyAspectRatio.toFixed(2)}`);
 
         const labelText = labelParts.join(' | ');
         ctx.font = 'bold 12px Inter, monospace';

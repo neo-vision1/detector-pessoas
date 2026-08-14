@@ -6,19 +6,19 @@ O detector mantém o `COCO-SSD lite_mobilenet_v2` para localizar pessoas e execu
 
 > **Importante:** a implementação histórica do projeto menciona “YOLOv8 Nano”, mas o pacote atualmente usado para localizar pessoas é o COCO-SSD. Uma caixa de detecção, por si só, não contém pontos corporais. O MoveNet foi integrado para entregar os keypoints sem substituir imediatamente o detector e sem comprometer o pipeline de contagem já validado.
 
-A configuração usa `multiPoseMaxDimension: 256`, suavização interna e rastreamento do próprio MoveNet. A inferência é executada por intervalo adaptativo, aproximadamente três vezes por segundo com uma pessoa e duas vezes por segundo com várias pessoas; nos frames intermediários, o último resultado é reutilizado. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
+A configuração usa `multiPoseMaxDimension: 256`, suavização interna e rastreamento do próprio MoveNet. A detecção COCO-SSD roda em aproximadamente 8 Hz, ou 5,5 Hz quando o FPS já está baixo. A pose é executada por intervalo adaptativo, aproximadamente três vezes por segundo com uma pessoa e duas vezes por segundo com várias pessoas; nos frames intermediários, o último resultado é reutilizado. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
 
 ## Keypoints visíveis
 
-O skeleton é desenhado diretamente sobre cada pessoa detectada. Os círculos representam os pontos com confiança suficiente e as linhas representam as conexões corporais. Os textos individuais de cada ponto foram removidos para reduzir o custo de renderização; a razão `R:valor` continua visível no box.
+O skeleton é desenhado diretamente sobre cada pessoa detectada. Os círculos representam os pontos com confiança suficiente e as linhas representam as conexões corporais. Os textos individuais de cada ponto e a etiqueta da razão corporal foram removidos para reduzir o custo de renderização. A razão continua sendo calculada internamente para a classificação.
 
 | Abreviação | Região |
 |---|---|
 | Pontos visíveis | Ombros, quadril, joelhos, tornozelos, cotovelos, pulsos e nariz |
 | Skeleton | Linhas conectando as articulações com confiança suficiente |
-| `R:valor` | Razão largura/altura dos keypoints visíveis |
+| Razão corporal | Calculada internamente para classificar a postura, sem texto adicional na tela |
 
-A etiqueta do box também exibe `R:valor`, em que `valor` é a razão entre a largura e a altura do conjunto de keypoints visíveis. Uma razão maior indica uma configuração mais horizontal, mas ela não deve ser usada isoladamente porque perspectiva, oclusão e enquadramento alteram a medida.
+A razão corporal é calculada entre a largura e a altura do conjunto de keypoints visíveis. Uma razão maior indica uma configuração mais horizontal, mas ela não é usada isoladamente porque perspectiva, oclusão e enquadramento alteram a medida.
 
 ## Classificação de postura
 

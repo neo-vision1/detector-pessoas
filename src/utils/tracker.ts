@@ -43,9 +43,11 @@ export class SimpleCentroidTracker {
   private lastRoiCheckAt = 0;
   private lastRoiViolations: string[] = [];
   private lastLineCrossingAt = new Map<string, number>();
+  private postureHistory = new Map<number, PostureState[]>();
+  private readonly postureHistoryLength = 4;
 
   public update(
-    rawDetections: Array<{ bbox: [number, number, number, number]; score: number; class: string; keypoints?: Keypoint[]; posture?: PostureState }>,
+    rawDetections: Array<{ bbox: [number, number, number, number]; score: number; class: string; keypoints?: Keypoint[]; posture?: PostureState; bodyAspectRatio?: number }>,
     canvasWidth: number,
     canvasHeight: number,
     lines: CountingLine[],
@@ -68,6 +70,7 @@ export class SimpleCentroidTracker {
       class: det.class,
       keypoints: det.keypoints,
       posture: det.posture,
+      bodyAspectRatio: det.bodyAspectRatio,
     }));
 
     if (this.trackedObjects.size === 0) {
@@ -84,9 +87,11 @@ export class SimpleCentroidTracker {
             speed: 0,
             keypoints: det.keypoints,
             posture: det.posture ?? 'unknown',
+            bodyAspectRatio: det.bodyAspectRatio,
           },
           disappearedFrames: 0,
         });
+        this.postureHistory.set(id, det.posture ? [det.posture] : []);
       }
     } else {
       const existingIds = Array.from(this.trackedObjects.keys());
@@ -132,7 +137,8 @@ export class SimpleCentroidTracker {
         trackedObject.person.trail = [...trackedObject.person.trail, newCentroid].slice(-12);
         trackedObject.person.speed = Math.round(Math.hypot(dx, dy));
         trackedObject.person.keypoints = input.keypoints;
-        trackedObject.person.posture = input.posture ?? trackedObject.person.posture ?? 'unknown';
+        trackedObject.person.bodyAspectRatio = input.bodyAspectRatio ?? trackedObject.person.bodyAspectRatio;
+        trackedObject.person.posture = this.stabilizePosture(item.existingId, input.posture);
         trackedObject.disappearedFrames = 0;
 
         // A caixa delimitadora elimina a maioria das linhas antes da interseção exata.
@@ -157,6 +163,7 @@ export class SimpleCentroidTracker {
         trackedObject.disappearedFrames += 1;
         if (trackedObject.disappearedFrames > this.maxDisappearedFrames) {
           this.trackedObjects.delete(id);
+          this.postureHistory.delete(id);
           for (const line of geometry.lines) {
             this.lastLineCrossingAt.delete(`${id}:${line.id}`);
           }
@@ -177,9 +184,11 @@ export class SimpleCentroidTracker {
             speed: 0,
             keypoints: input.keypoints,
             posture: input.posture ?? 'unknown',
+            bodyAspectRatio: input.bodyAspectRatio,
           },
           disappearedFrames: 0,
         });
+        this.postureHistory.set(id, input.posture ? [input.posture] : []);
       });
     }
 
@@ -203,12 +212,20 @@ export class SimpleCentroidTracker {
     };
   }
 
-  private getGeometry(
-    lines: CountingLine[],
-    rois: ROIZone[],
-    width: number,
-    height: number
-  ): GeometryCache {
+  private stabilizePosture(id: number, next: PostureState | undefined): PostureState {
+    const history = this.postureHistory.get(id) ?? [];
+    if (next && next !== 'unknown') history.push(next);
+    if (history.length > this.postureHistoryLength) history.splice(0, history.length - this.postureHistoryLength);
+    this.postureHistory.set(id, history);
+
+    const fallenVotes = history.filter((value) => value === 'fallen').length;
+    const standingVotes = history.filter((value) => value === 'standing').length;
+    if (fallenVotes >= 2 && fallenVotes >= standingVotes) return 'fallen';
+    if (standingVotes >= 2 && standingVotes > fallenVotes) return 'standing';
+    return history[history.length - 1] ?? 'unknown';
+  }
+
+  private getGeometry(lines: CountingLine[], rois: ROIZone[], width: number, height: number): GeometryCache {
     const lineSignature = lines
       .map((line) => `${line.id}:${line.p1.x},${line.p1.y},${line.p2.x},${line.p2.y}`)
       .join('|');

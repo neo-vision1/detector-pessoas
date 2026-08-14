@@ -57,12 +57,31 @@ type PoseDetectionInput = {
   class: string;
   keypoints?: Keypoint[];
   posture?: PostureState;
+  bodyAspectRatio?: number;
 };
 
 type PoseResult = {
   centroid: Point;
   keypoints: Keypoint[];
   posture: PostureState;
+  bodyAspectRatio: number;
+};
+
+const POSE_CONNECTIONS: Array<[string, string]> = [
+  ['nose', 'left_shoulder'], ['nose', 'right_shoulder'],
+  ['left_shoulder', 'right_shoulder'], ['left_shoulder', 'left_elbow'],
+  ['left_elbow', 'left_wrist'], ['right_shoulder', 'right_elbow'],
+  ['right_elbow', 'right_wrist'], ['left_shoulder', 'left_hip'],
+  ['right_shoulder', 'right_hip'], ['left_hip', 'right_hip'],
+  ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
+  ['right_hip', 'right_knee'], ['right_knee', 'right_ankle'],
+];
+
+const POSE_LABELS: Record<string, string> = {
+  nose: 'N', left_shoulder: 'O.E', right_shoulder: 'O.D',
+  left_hip: 'Q.E', right_hip: 'Q.D', left_knee: 'J.E',
+  right_knee: 'J.D', left_ankle: 'T.E', right_ankle: 'T.D',
+  left_elbow: 'C.E', right_elbow: 'C.D', left_wrist: 'P.E', right_wrist: 'P.D',
 };
 
 async function initializeTensorFlowBackend(): Promise<string> {
@@ -84,17 +103,28 @@ async function initializeTensorFlowBackend(): Promise<string> {
   throw new Error('Nenhum backend TensorFlow.js pôde ser inicializado (WebGL/CPU).');
 }
 
-function classifyPosture(keypoints: Keypoint[]): PostureState {
+type PostureAnalysis = {
+  posture: PostureState;
+  bodyAspectRatio: number;
+};
+
+function classifyPosture(keypoints: Keypoint[]): PostureAnalysis {
   const visible = keypoints.filter((point) => (point.score ?? 1) >= 0.25);
-  if (visible.length < 5) return 'unknown';
+  const minX = visible.length ? Math.min(...visible.map((point) => point.x)) : 0;
+  const maxX = visible.length ? Math.max(...visible.map((point) => point.x)) : 0;
+  const minY = visible.length ? Math.min(...visible.map((point) => point.y)) : 0;
+  const maxY = visible.length ? Math.max(...visible.map((point) => point.y)) : 0;
+  const bodyWidth = maxX - minX;
+  const bodyHeight = maxY - minY;
+  const bodyAspectRatio = bodyHeight > 1 ? bodyWidth / bodyHeight : 0;
+  if (visible.length < 5) return { posture: 'unknown', bodyAspectRatio };
 
   const get = (name: string) => visible.find((point) => point.name === name);
   const shoulders = [get('left_shoulder'), get('right_shoulder')].filter(Boolean) as Keypoint[];
   const hips = [get('left_hip'), get('right_hip')].filter(Boolean) as Keypoint[];
   const knees = [get('left_knee'), get('right_knee')].filter(Boolean) as Keypoint[];
   const ankles = [get('left_ankle'), get('right_ankle')].filter(Boolean) as Keypoint[];
-
-  if (shoulders.length < 1 || hips.length < 1) return 'unknown';
+  if (shoulders.length < 1 || hips.length < 1) return { posture: 'unknown', bodyAspectRatio };
 
   const average = (points: Keypoint[]): Point => ({
     x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
@@ -104,80 +134,92 @@ function classifyPosture(keypoints: Keypoint[]): PostureState {
   const hipCenter = average(hips);
   const kneeCenter = knees.length > 0 ? average(knees) : null;
   const ankleCenter = ankles.length > 0 ? average(ankles) : null;
-  const minX = Math.min(...visible.map((point) => point.x));
-  const maxX = Math.max(...visible.map((point) => point.x));
-  const minY = Math.min(...visible.map((point) => point.y));
-  const maxY = Math.max(...visible.map((point) => point.y));
-  const bodyWidth = maxX - minX;
-  const bodyHeight = maxY - minY;
   const torsoDx = Math.abs(hipCenter.x - shoulderCenter.x);
   const torsoDy = Math.abs(hipCenter.y - shoulderCenter.y);
   const torsoAngleFromVertical = Math.atan2(torsoDx, Math.max(torsoDy, 1));
-
-  // Uma pessoa caída tende a ocupar mais largura que altura e a cadeia
-  // ombro-quadril deixa de estar predominantemente vertical.
-  const horizontalBody = bodyWidth > bodyHeight * 1.15;
+  const horizontalBody = bodyAspectRatio > 1.15;
   const horizontalTorso = torsoAngleFromVertical > 0.95;
   const lowerBodyAligned = kneeCenter && ankleCenter
     ? ankleCenter.y > kneeCenter.y && kneeCenter.y > hipCenter.y
     : true;
 
-  if (horizontalBody || horizontalTorso || !lowerBodyAligned) return 'fallen';
-  return 'standing';
+  return {
+    posture: horizontalBody || horizontalTorso || !lowerBodyAligned ? 'fallen' : 'standing',
+    bodyAspectRatio,
+  };
+}
+
+function mapPoseKeypoints(keypoints: poseDetection.Keypoint[]): Keypoint[] {
+  return keypoints.map((point) => ({
+    x: point.x,
+    y: point.y,
+    score: point.score,
+    name: point.name,
+  }));
 }
 
 async function enrichWithPose(
   detector: poseDetection.PoseDetector | null,
   video: HTMLVideoElement,
   detections: PoseDetectionInput[],
-  cropCanvas: HTMLCanvasElement,
   previousResults: PoseResult[],
   runInference: boolean
 ): Promise<{ detections: PoseDetectionInput[]; results: PoseResult[] }> {
   if (!detector || detections.length === 0) return { detections, results: previousResults };
 
-  const results: PoseResult[] = runInference ? [] : previousResults;
+  let results = previousResults;
   if (runInference) {
-    const context = cropCanvas.getContext('2d');
-    if (!context) return { detections, results: previousResults };
-
-    cropCanvas.width = 192;
-    cropCanvas.height = 192;
-    for (const detection of detections.slice(0, 8)) {
-      const [x, y, width, height] = detection.bbox;
-      if (width < 20 || height < 20) continue;
-      context.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
-      context.drawImage(video, x, y, width, height, 0, 0, cropCanvas.width, cropCanvas.height);
-      const poses = await detector.estimatePoses(cropCanvas, { flipHorizontal: false });
-      const pose = poses[0];
-      if (!pose || (pose.score ?? 0) < 0.2) continue;
-
-      const mappedKeypoints: Keypoint[] = pose.keypoints.map((point) => ({
-        x: x + (point.x / cropCanvas.width) * width,
-        y: y + (point.y / cropCanvas.height) * height,
-        score: point.score,
-        name: point.name,
-      }));
-      results.push({
-        centroid: { x: x + width / 2, y: y + height / 2 },
-        keypoints: mappedKeypoints,
-        posture: classifyPosture(mappedKeypoints),
+    const poses = await detector.estimatePoses(video, {
+      flipHorizontal: false,
+      maxPoses: 6,
+    });
+    results = poses
+      .filter((pose) => (pose.score ?? 0) >= 0.2)
+      .map((pose) => {
+        const keypoints = mapPoseKeypoints(pose.keypoints);
+        const analysis = classifyPosture(keypoints);
+        const center = keypoints.length
+          ? {
+              x: keypoints.reduce((sum, point) => sum + point.x, 0) / keypoints.length,
+              y: keypoints.reduce((sum, point) => sum + point.y, 0) / keypoints.length,
+            }
+          : { x: 0, y: 0 };
+        return {
+          centroid: center,
+          keypoints,
+          posture: analysis.posture,
+          bodyAspectRatio: analysis.bodyAspectRatio,
+        };
       });
-    }
   }
 
+  const usedPoseIndexes = new Set<number>();
   const enriched = detections.map((detection) => {
-    const center = { x: detection.bbox[0] + detection.bbox[2] / 2, y: detection.bbox[1] + detection.bbox[3] / 2 };
-    let best: PoseResult | null = null;
+    const center = {
+      x: detection.bbox[0] + detection.bbox[2] / 2,
+      y: detection.bbox[1] + detection.bbox[3] / 2,
+    };
+    let bestIndex = -1;
     let bestDistance = Infinity;
-    for (const result of results) {
+    results.forEach((result, index) => {
+      if (usedPoseIndexes.has(index)) return;
       const distance = Math.hypot(result.centroid.x - center.x, result.centroid.y - center.y);
-      if (distance < bestDistance && distance < Math.max(detection.bbox[2], detection.bbox[3]) * 0.8) {
-        best = result;
+      const maxDistance = Math.max(detection.bbox[2], detection.bbox[3]) * 0.95;
+      if (distance < bestDistance && distance < maxDistance) {
+        bestIndex = index;
         bestDistance = distance;
       }
-    }
-    return best ? { ...detection, keypoints: best.keypoints, posture: best.posture } : { ...detection, posture: 'unknown' as PostureState };
+    });
+
+    if (bestIndex < 0) return { ...detection, posture: 'unknown' as PostureState };
+    usedPoseIndexes.add(bestIndex);
+    const best = results[bestIndex];
+    return {
+      ...detection,
+      keypoints: best.keypoints,
+      posture: best.posture,
+      bodyAspectRatio: best.bodyAspectRatio,
+    };
   });
 
   return { detections: enriched, results };
@@ -203,9 +245,8 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   // COCO-SSD / Vision model ref
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
   const poseDetectorRef = useRef<poseDetection.PoseDetector | null>(null);
-  const poseCropCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const poseFrameCounterRef = useRef(0);
-  const lastPoseResultsRef = useRef<Array<{ centroid: Point; keypoints: Keypoint[]; posture: PostureState }>>([]);
+  const lastPoseResultsRef = useRef<PoseResult[]>([]);
   const trackerRef = useRef<SimpleCentroidTracker>(new SimpleCentroidTracker());
 
   // State
@@ -287,7 +328,12 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       try {
         const detector = await poseDetection.createDetector(
           poseDetection.SupportedModels.MoveNet,
-          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+          {
+            modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+            multiPoseMaxDimension: 320,
+            enableSmoothing: true,
+            enableTracking: true,
+          }
         );
         if (isMounted) {
           poseDetectorRef.current = detector;
@@ -517,13 +563,10 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         // Pose é atualizada em aproximadamente 5 Hz; nos demais frames o último
         // resultado é reaproveitado para não derrubar o FPS da detecção principal.
         poseFrameCounterRef.current = (poseFrameCounterRef.current + 1) % 6;
-        const cropCanvas = poseCropCanvasRef.current || document.createElement('canvas');
-        poseCropCanvasRef.current = cropCanvas;
         const poseUpdate = await enrichWithPose(
           poseDetectorRef.current,
           video,
           personDetections,
-          cropCanvas,
           lastPoseResultsRef.current,
           poseFrameCounterRef.current === 0
         );
@@ -708,13 +751,32 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         ctx.setLineDash([]);
       }
 
-      // Pose Skeleton Keypoints
-      if (configRef.current.showPoseKeypoints && person.keypoints) {
+      // Skeleton e keypoints: permanecem visíveis para conferir a qualidade da pose.
+      if (person.keypoints && person.keypoints.length > 0) {
+        const keypointsByName = new Map(person.keypoints.filter((kp) => (kp.score ?? 1) >= 0.25).map((kp) => [kp.name, kp]));
+        ctx.strokeStyle = person.posture === 'fallen' ? '#FFB3C1' : '#00E5FF';
+        ctx.lineWidth = 2;
+        POSE_CONNECTIONS.forEach(([fromName, toName]) => {
+          const from = keypointsByName.get(fromName);
+          const to = keypointsByName.get(toName);
+          if (!from || !to) return;
+          ctx.beginPath();
+          ctx.moveTo(from.x, from.y);
+          ctx.lineTo(to.x, to.y);
+          ctx.stroke();
+        });
+
         person.keypoints.forEach((kp) => {
-          ctx.fillStyle = '#00E5FF';
+          if ((kp.score ?? 1) < 0.25) return;
+          ctx.fillStyle = person.posture === 'fallen' ? '#FFEA70' : '#00E5FF';
           ctx.beginPath();
           ctx.arc(kp.x, kp.y, 4, 0, Math.PI * 2);
           ctx.fill();
+          if (kp.name && POSE_LABELS[kp.name]) {
+            ctx.font = 'bold 10px monospace';
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(POSE_LABELS[kp.name], kp.x + 5, kp.y - 5);
+          }
         });
       }
 
@@ -726,6 +788,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         if (configRef.current.showConfidence) labelParts.push(`${(person.score * 100).toFixed(1)}%`);
         if (person.posture === 'standing') labelParts.push('EM PÉ');
         if (person.posture === 'fallen') labelParts.push('CAÍDA');
+        if (person.bodyAspectRatio && person.bodyAspectRatio > 0) labelParts.push(`R:${person.bodyAspectRatio.toFixed(2)}`);
 
         const labelText = labelParts.join(' | ');
         ctx.font = 'bold 12px Inter, monospace';

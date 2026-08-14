@@ -34,6 +34,7 @@ export interface DetectedPerson {
   speed: number; // pixels per frame or relative
   keypoints?: Keypoint[];
   posture?: PostureState;
+  bodyAspectRatio?: number;
 }
 
 export interface CountingLine {

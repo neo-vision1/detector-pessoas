@@ -20,6 +20,7 @@ import { AIInspectorModal } from './components/AIInspectorModal';
 import { SampleVideoPicker } from './components/SampleVideoPicker';
 import { IPCameraModal } from './components/IPCameraModal';
 import { ReportModal } from './components/ReportModal';
+import { PTZControls } from './components/PTZControls';
 import { ShieldAlert, Sparkles, Upload } from 'lucide-react';
 
 export default function App() {
@@ -400,6 +401,7 @@ export default function App() {
               setRoiZones={setRoiZones}
               onResetCounts={resetMetrics}
             />
+            {videoSourceType === 'ip-camera' && <div className="mt-6"><PTZControls /></div>}
           </div>
         </div>
 

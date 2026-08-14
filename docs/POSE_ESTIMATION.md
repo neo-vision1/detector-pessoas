@@ -2,11 +2,11 @@
 
 ## Visão geral
 
-O detector mantém o `COCO-SSD lite_mobilenet_v2` para localizar pessoas e executa um segundo estágio leve de **estimativa de pose** sobre o frame completo. Esse estágio utiliza o **MoveNet MultiPose Lightning**, que retorna até seis poses no mesmo frame e 17 keypoints corporais por pessoa [1].
+O detector mantém o `COCO-SSD lite_mobilenet_v2` para localizar pessoas e executa um segundo estágio leve de **estimativa de pose** sobre o frame completo. Esse estágio utiliza o **MoveNet SinglePose Lightning** em recortes individuais e retorna 17 keypoints corporais por pessoa [1].
 
 > **Importante:** a implementação histórica do projeto menciona “YOLOv8 Nano”, mas o pacote atualmente usado para localizar pessoas é o COCO-SSD. Uma caixa de detecção, por si só, não contém pontos corporais. O MoveNet foi integrado para entregar os keypoints sem substituir imediatamente o detector e sem comprometer o pipeline de contagem já validado.
 
-A configuração usa `multiPoseMaxDimension: 192`, suavização interna e rastreamento do próprio MoveNet. A detecção COCO-SSD roda em aproximadamente 5,5 Hz, ou 3,8 Hz quando o FPS já está baixo. A pose é executada por intervalo adaptativo, aproximadamente duas vezes por segundo com uma pessoa e 1,5 vez por segundo com várias pessoas; nos frames intermediários, o último resultado é reutilizado. As trilhas de movimento não são mais desenhadas e o histórico visual do rastreador foi reduzido para quatro pontos. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
+A configuração usa SinglePose Lightning com entrada de 192 × 192 pixels, suavização interna e processamento sob demanda das duas maiores caixas detectadas. A detecção COCO-SSD roda em aproximadamente 5,5 Hz, ou 3,8 Hz quando o FPS já está baixo. A pose é executada por intervalo adaptativo, aproximadamente duas vezes por segundo, e os frames intermediários reutilizam o último resultado. As trilhas de movimento não são mais desenhadas e o histórico visual do rastreador foi reduzido para quatro pontos. Pessoas adicionais usam a classificação geométrica do box para evitar várias inferências de pose concorrentes.
 
 ## Keypoints visíveis
 
@@ -36,12 +36,12 @@ A indicação **“Possível queda”** não é diagnóstico médico nem confirm
 
 ## Desempenho e evolução para YOLO Pose
 
-A escolha do MoveNet MultiPose preserva a otimização atual porque evita uma inferência de pose separada para cada pessoa. O detector principal continua responsável por caixas, linhas, zonas e rastreamento; o MoveNet é executado em baixa frequência e os resultados são reutilizados nos demais frames.
+A escolha do MoveNet SinglePose por recorte preserva a otimização atual para a cena usual, em que há uma ou poucas pessoas. O detector principal continua responsável por caixas, linhas, zonas e rastreamento; o MoveNet é executado em baixa frequência, em no máximo duas caixas por rodada, e os resultados são reutilizados nos demais frames.
 
 Um modelo YOLO de pose poderia retornar caixas e keypoints em uma única inferência [2]. Entretanto, sua execução no navegador exigiria exportação para ONNX ou TensorFlow.js, pós-processamento específico e nova validação de memória, WebGL/WebGPU e desempenho. Por isso, a migração para YOLO Pose Nano fica como opção posterior caso a medição real no Windows mostre que o pipeline combinado ainda não atende ao FPS desejado.
 
 ## Referências
 
-[1]: https://github.com/tensorflow/tfjs-models/tree/master/pose-detection/src/movenet/README.md "TensorFlow.js Pose Detection — MoveNet MultiPose"
+[1]: https://github.com/tensorflow/tfjs-models/tree/master/pose-detection/src/movenet/README.md "TensorFlow.js Pose Detection — MoveNet"
 
 [2]: https://docs.ultralytics.com/tasks/pose/ "Ultralytics — Pose estimation"

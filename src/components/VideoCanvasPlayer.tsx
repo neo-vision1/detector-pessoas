@@ -156,6 +156,7 @@ function mapPoseKeypoints(keypoints: poseDetection.Keypoint[]): Keypoint[] {
 async function enrichWithPose(
   detector: poseDetection.PoseDetector | null,
   video: HTMLVideoElement,
+  cropCanvas: HTMLCanvasElement,
   detections: PoseDetectionInput[],
   previousResults: PoseResult[],
   runInference: boolean
@@ -164,28 +165,40 @@ async function enrichWithPose(
 
   let results = previousResults;
   if (runInference) {
-    const poses = await detector.estimatePoses(video, {
-      flipHorizontal: false,
-      maxPoses: 6,
-    });
-    results = poses
-      .filter((pose) => (pose.score ?? 0) >= 0.2)
-      .map((pose) => {
-        const keypoints = mapPoseKeypoints(pose.keypoints);
-        const analysis = classifyPosture(keypoints);
-        const center = keypoints.length
-          ? {
-              x: keypoints.reduce((sum, point) => sum + point.x, 0) / keypoints.length,
-              y: keypoints.reduce((sum, point) => sum + point.y, 0) / keypoints.length,
-            }
-          : { x: 0, y: 0 };
-        return {
-          centroid: center,
+    cropCanvas.width = 192;
+    cropCanvas.height = 192;
+    const context = cropCanvas.getContext('2d');
+    results = [];
+
+    // SinglePose é mais leve para a cena usual. Processamos somente as duas
+    // maiores caixas; pessoas adicionais usam o fallback geométrico do box.
+    const candidates = [...detections]
+      .sort((a, b) => b.bbox[2] * b.bbox[3] - a.bbox[2] * a.bbox[3])
+      .slice(0, 2);
+    if (context) {
+      for (const detection of candidates) {
+        const [x, y, width, height] = detection.bbox;
+        if (width < 16 || height < 16) continue;
+        context.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+        context.drawImage(video, x, y, width, height, 0, 0, cropCanvas.width, cropCanvas.height);
+        const poses = await detector.estimatePoses(cropCanvas, { flipHorizontal: false });
+        const pose = poses[0];
+        if (!pose || (pose.score ?? 0) < 0.2) continue;
+        const keypoints = mapPoseKeypoints(pose.keypoints).map((point) => ({
+          ...point,
+          x: x + (point.x / cropCanvas.width) * width,
+          y: y + (point.y / cropCanvas.height) * height,
+        }));
+        const bboxAspectRatio = width / Math.max(height, 1);
+        const analysis = classifyPosture(keypoints, bboxAspectRatio);
+        results.push({
+          centroid: { x: x + width / 2, y: y + height / 2 },
           keypoints,
           posture: analysis.posture,
-          bodyAspectRatio: analysis.bodyAspectRatio,
-        };
-      });
+          bodyAspectRatio: analysis.bodyAspectRatio || bboxAspectRatio,
+        });
+      }
+    }
   }
 
   const usedPoseIndexes = new Set<number>();
@@ -206,8 +219,8 @@ async function enrichWithPose(
       }
     });
 
+    const detectionAspectRatio = detection.bbox[2] / Math.max(detection.bbox[3], 1);
     if (bestIndex < 0) {
-      const detectionAspectRatio = detection.bbox[2] / Math.max(detection.bbox[3], 1);
       return {
         ...detection,
         posture: detectionAspectRatio >= 1.60 ? 'fallen' : 'unknown' as PostureState,
@@ -216,12 +229,10 @@ async function enrichWithPose(
     }
     usedPoseIndexes.add(bestIndex);
     const best = results[bestIndex];
-    const detectionAspectRatio = detection.bbox[2] / Math.max(detection.bbox[3], 1);
-    const posture = detectionAspectRatio >= 1.60 ? 'fallen' : best.posture;
     return {
       ...detection,
       keypoints: best.keypoints,
-      posture,
+      posture: detectionAspectRatio >= 1.60 ? 'fallen' : best.posture,
       bodyAspectRatio: best.bodyAspectRatio || detectionAspectRatio,
     };
   });
@@ -251,6 +262,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   const poseDetectorRef = useRef<poseDetection.PoseDetector | null>(null);
   const lastPoseInferenceAtRef = useRef(0);
   const lastPoseResultsRef = useRef<PoseResult[]>([]);
+  const poseCropCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const trackerRef = useRef<SimpleCentroidTracker>(new SimpleCentroidTracker());
   const lastDetectionAtRef = useRef(0);
   const lastTrackedPersonsRef = useRef<DetectedPerson[]>([]);
@@ -336,10 +348,8 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         const detector = await poseDetection.createDetector(
           poseDetection.SupportedModels.MoveNet,
           {
-            modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-            multiPoseMaxDimension: 192,
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
             enableSmoothing: true,
-            enableTracking: true,
           }
         );
         if (isMounted) {
@@ -574,16 +584,19 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
               posture: 'unknown',
             }));
 
-          // A pose também é adaptativa: aproximadamente 3 Hz com uma pessoa
-          // e 2 Hz com várias pessoas, sem bloquear o detector principal.
+          // A pose também é adaptativa: aproximadamente 2 Hz com uma pessoa
+          // e 1,5 Hz com várias pessoas, sem bloquear o detector principal.
           if (personDetections.length === 0) lastPoseResultsRef.current = [];
           const poseIntervalMs = personDetections.length > 2 ? 650 : 480;
           const shouldRunPose =
             lastPoseResultsRef.current.length === 0 || now - lastPoseInferenceAtRef.current >= poseIntervalMs;
           if (shouldRunPose) lastPoseInferenceAtRef.current = now;
+          const poseCropCanvas = poseCropCanvasRef.current || document.createElement('canvas');
+          poseCropCanvasRef.current = poseCropCanvas;
           const poseUpdate = await enrichWithPose(
             poseDetectorRef.current,
             video,
+            poseCropCanvas,
             personDetections,
             lastPoseResultsRef.current,
             shouldRunPose

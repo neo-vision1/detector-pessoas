@@ -8,6 +8,8 @@ interface MetricsPanelProps {
   totalLineIn: number;
   totalLineOut: number;
   currentLineOccupancy: number;
+  standingPersonCount: number;
+  fallenPersonCount: number;
   fps: number;
   alertThreshold: number;
   isCapacityExceeded: boolean;
@@ -20,6 +22,8 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
   totalLineIn,
   totalLineOut,
   currentLineOccupancy,
+  standingPersonCount,
+  fallenPersonCount,
   fps,
   alertThreshold,
   isCapacityExceeded,
@@ -57,11 +61,13 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
         </div>
 
         <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-          <span className="text-slate-400">Limite de Lotação: {alertThreshold}</span>
-          {isCapacityExceeded ? (
+          <span className="text-slate-400">Em pé: <strong className="font-mono text-emerald-400">{standingPersonCount}</strong></span>
+          {fallenPersonCount > 0 ? (
             <span className="text-rose-400 font-bold flex items-center gap-1">
-              <ShieldAlert className="w-3 h-3" /> ALERTA!
+              <ShieldAlert className="w-3 h-3" /> Caídas: {fallenPersonCount}
             </span>
+          ) : isCapacityExceeded ? (
+            <span className="text-rose-400 font-bold">Lotação!</span>
           ) : (
             <span className="text-emerald-400 font-medium">Normal</span>
           )}

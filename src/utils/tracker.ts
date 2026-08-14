@@ -1,4 +1,4 @@
-import { DetectedPerson, Point, CountingLine, ROIZone, Keypoint } from '../types';
+import { DetectedPerson, Point, CountingLine, ROIZone, Keypoint, PostureState } from '../types';
 
 interface Bounds {
   minX: number;
@@ -45,7 +45,7 @@ export class SimpleCentroidTracker {
   private lastLineCrossingAt = new Map<string, number>();
 
   public update(
-    rawDetections: Array<{ bbox: [number, number, number, number]; score: number; class: string; keypoints?: Keypoint[] }>,
+    rawDetections: Array<{ bbox: [number, number, number, number]; score: number; class: string; keypoints?: Keypoint[]; posture?: PostureState }>,
     canvasWidth: number,
     canvasHeight: number,
     lines: CountingLine[],
@@ -67,6 +67,7 @@ export class SimpleCentroidTracker {
       score: det.score,
       class: det.class,
       keypoints: det.keypoints,
+      posture: det.posture,
     }));
 
     if (this.trackedObjects.size === 0) {
@@ -82,6 +83,7 @@ export class SimpleCentroidTracker {
             trail: [det.centroid],
             speed: 0,
             keypoints: det.keypoints,
+            posture: det.posture ?? 'unknown',
           },
           disappearedFrames: 0,
         });
@@ -130,6 +132,7 @@ export class SimpleCentroidTracker {
         trackedObject.person.trail = [...trackedObject.person.trail, newCentroid].slice(-12);
         trackedObject.person.speed = Math.round(Math.hypot(dx, dy));
         trackedObject.person.keypoints = input.keypoints;
+        trackedObject.person.posture = input.posture ?? trackedObject.person.posture ?? 'unknown';
         trackedObject.disappearedFrames = 0;
 
         // A caixa delimitadora elimina a maioria das linhas antes da interseção exata.
@@ -173,6 +176,7 @@ export class SimpleCentroidTracker {
             trail: [input.centroid],
             speed: 0,
             keypoints: input.keypoints,
+            posture: input.posture ?? 'unknown',
           },
           disappearedFrames: 0,
         });

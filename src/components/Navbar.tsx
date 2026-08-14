@@ -1,14 +1,12 @@
-import React from 'react';
+import type { FC } from 'react';
 import { VideoSourceType } from '../types';
-import { Camera, Upload, Film, Sparkles, FileText, Moon, Sun } from 'lucide-react';
+import { Camera, Upload, FileText, Moon, Sun, Sparkles } from 'lucide-react';
 
 interface NavbarProps {
   videoSourceType: VideoSourceType;
   setVideoSourceType: (type: VideoSourceType) => void;
   fps: number;
   activePersonCount: number;
-  onOpenSamplePicker: () => void;
-  onOpenAiModal: () => void;
   onOpenReport: () => void;
   onUploadClick: () => void;
   onOpenIPCamera: () => void;
@@ -16,13 +14,11 @@ interface NavbarProps {
   onToggleTheme: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({
+export const Navbar: FC<NavbarProps> = ({
   videoSourceType,
   setVideoSourceType,
   fps,
   activePersonCount,
-  onOpenSamplePicker,
-  onOpenAiModal,
   onOpenReport,
   onUploadClick,
   onOpenIPCamera,
@@ -69,11 +65,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Webcam ao Vivo</span>
           </button>
 
-          <button onClick={onOpenSamplePicker} className={`flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${videoSourceType === 'sample' ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 shadow-md shadow-emerald-950/50' : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
-            <Film className="w-3.5 h-3.5 text-amber-400" />
-            <span>Vídeos Demo</span>
-          </button>
-
           <button onClick={onOpenReport} className="flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 transition-all">
             <FileText className="w-3.5 h-3.5" />
             <span>Relatório</span>
@@ -82,11 +73,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button onClick={onToggleTheme} title={theme === 'dark' ? 'Ativar tema White' : 'Ativar tema Dark'} className="flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900 px-2 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white">
             {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-300" /> : <Moon className="w-4 h-4 text-indigo-400" />}
             <span>{theme === 'dark' ? 'Dark' : 'White'}</span>
-          </button>
-
-          <button onClick={onOpenAiModal} className="flex items-center space-x-1.5 text-xs font-bold px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-lg shadow-emerald-900/30 hover:brightness-110 active:scale-95 transition-all border border-emerald-400/30">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Análise Gemini AI</span>
           </button>
         </div>
       </div>

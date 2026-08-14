@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
+import * as poseDetection from '@tensorflow-models/pose-detection';
 import '@tensorflow/tfjs';
 import Hls from 'hls.js';
 import {
   DetectionConfig,
   VideoSourceType,
   DetectedPerson,
+  Keypoint,
+  PostureState,
   CountingLine,
   ROIZone,
   Point,
@@ -48,6 +51,119 @@ interface VideoCanvasPlayerProps {
   onTakeSnapshot: (canvas: HTMLCanvasElement, persons: DetectedPerson[]) => void;
 }
 
+type PoseDetectionInput = {
+  bbox: [number, number, number, number];
+  score: number;
+  class: string;
+  keypoints?: Keypoint[];
+  posture?: PostureState;
+};
+
+type PoseResult = {
+  centroid: Point;
+  keypoints: Keypoint[];
+  posture: PostureState;
+};
+
+function classifyPosture(keypoints: Keypoint[]): PostureState {
+  const visible = keypoints.filter((point) => (point.score ?? 1) >= 0.25);
+  if (visible.length < 5) return 'unknown';
+
+  const get = (name: string) => visible.find((point) => point.name === name);
+  const shoulders = [get('left_shoulder'), get('right_shoulder')].filter(Boolean) as Keypoint[];
+  const hips = [get('left_hip'), get('right_hip')].filter(Boolean) as Keypoint[];
+  const knees = [get('left_knee'), get('right_knee')].filter(Boolean) as Keypoint[];
+  const ankles = [get('left_ankle'), get('right_ankle')].filter(Boolean) as Keypoint[];
+
+  if (shoulders.length < 1 || hips.length < 1) return 'unknown';
+
+  const average = (points: Keypoint[]): Point => ({
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  });
+  const shoulderCenter = average(shoulders);
+  const hipCenter = average(hips);
+  const kneeCenter = knees.length > 0 ? average(knees) : null;
+  const ankleCenter = ankles.length > 0 ? average(ankles) : null;
+  const minX = Math.min(...visible.map((point) => point.x));
+  const maxX = Math.max(...visible.map((point) => point.x));
+  const minY = Math.min(...visible.map((point) => point.y));
+  const maxY = Math.max(...visible.map((point) => point.y));
+  const bodyWidth = maxX - minX;
+  const bodyHeight = maxY - minY;
+  const torsoDx = Math.abs(hipCenter.x - shoulderCenter.x);
+  const torsoDy = Math.abs(hipCenter.y - shoulderCenter.y);
+  const torsoAngleFromVertical = Math.atan2(torsoDx, Math.max(torsoDy, 1));
+
+  // Uma pessoa caída tende a ocupar mais largura que altura e a cadeia
+  // ombro-quadril deixa de estar predominantemente vertical.
+  const horizontalBody = bodyWidth > bodyHeight * 1.15;
+  const horizontalTorso = torsoAngleFromVertical > 0.95;
+  const lowerBodyAligned = kneeCenter && ankleCenter
+    ? ankleCenter.y > kneeCenter.y && kneeCenter.y > hipCenter.y
+    : true;
+
+  if (horizontalBody || horizontalTorso || !lowerBodyAligned) return 'fallen';
+  return 'standing';
+}
+
+async function enrichWithPose(
+  detector: poseDetection.PoseDetector | null,
+  video: HTMLVideoElement,
+  detections: PoseDetectionInput[],
+  cropCanvas: HTMLCanvasElement,
+  previousResults: PoseResult[],
+  runInference: boolean
+): Promise<{ detections: PoseDetectionInput[]; results: PoseResult[] }> {
+  if (!detector || detections.length === 0) return { detections, results: previousResults };
+
+  const results: PoseResult[] = runInference ? [] : previousResults;
+  if (runInference) {
+    const context = cropCanvas.getContext('2d');
+    if (!context) return { detections, results: previousResults };
+
+    cropCanvas.width = 192;
+    cropCanvas.height = 192;
+    for (const detection of detections.slice(0, 8)) {
+      const [x, y, width, height] = detection.bbox;
+      if (width < 20 || height < 20) continue;
+      context.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+      context.drawImage(video, x, y, width, height, 0, 0, cropCanvas.width, cropCanvas.height);
+      const poses = await detector.estimatePoses(cropCanvas, { flipHorizontal: false });
+      const pose = poses[0];
+      if (!pose || (pose.score ?? 0) < 0.2) continue;
+
+      const mappedKeypoints: Keypoint[] = pose.keypoints.map((point) => ({
+        x: x + (point.x / cropCanvas.width) * width,
+        y: y + (point.y / cropCanvas.height) * height,
+        score: point.score,
+        name: point.name,
+      }));
+      results.push({
+        centroid: { x: x + width / 2, y: y + height / 2 },
+        keypoints: mappedKeypoints,
+        posture: classifyPosture(mappedKeypoints),
+      });
+    }
+  }
+
+  const enriched = detections.map((detection) => {
+    const center = { x: detection.bbox[0] + detection.bbox[2] / 2, y: detection.bbox[1] + detection.bbox[3] / 2 };
+    let best: PoseResult | null = null;
+    let bestDistance = Infinity;
+    for (const result of results) {
+      const distance = Math.hypot(result.centroid.x - center.x, result.centroid.y - center.y);
+      if (distance < bestDistance && distance < Math.max(detection.bbox[2], detection.bbox[3]) * 0.8) {
+        best = result;
+        bestDistance = distance;
+      }
+    }
+    return best ? { ...detection, keypoints: best.keypoints, posture: best.posture } : { ...detection, posture: 'unknown' as PostureState };
+  });
+
+  return { detections: enriched, results };
+}
+
 export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   videoUrl,
   videoSourceType,
@@ -67,10 +183,15 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
 
   // COCO-SSD / Vision model ref
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
+  const poseDetectorRef = useRef<poseDetection.PoseDetector | null>(null);
+  const poseCropCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const poseFrameCounterRef = useRef(0);
+  const lastPoseResultsRef = useRef<Array<{ centroid: Point; keypoints: Keypoint[]; posture: PostureState }>>([]);
   const trackerRef = useRef<SimpleCentroidTracker>(new SimpleCentroidTracker());
 
   // State
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
+  const [isLoadingPose, setIsLoadingPose] = useState<boolean>(true);
   const [modelError, setModelError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(true);
@@ -137,6 +258,35 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       // Libera o modelo e os buffers associados quando o componente sai da tela.
       modelRef.current?.dispose?.();
       modelRef.current = null;
+    };
+  }, []);
+
+  // Pose estimation: MoveNet Lightning é usado por pessoa detectada para manter o
+  // processamento leve. O modelo entrega 17 keypoints corporais no navegador.
+  useEffect(() => {
+    let isMounted = true;
+    async function loadPoseDetector() {
+      try {
+        const detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
+          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+        );
+        if (isMounted) {
+          poseDetectorRef.current = detector;
+          setIsLoadingPose(false);
+        } else {
+          detector.dispose();
+        }
+      } catch (error) {
+        console.error('Erro ao carregar o estimador de pose:', error);
+        if (isMounted) setIsLoadingPose(false);
+      }
+    }
+    void loadPoseDetector();
+    return () => {
+      isMounted = false;
+      poseDetectorRef.current?.dispose();
+      poseDetectorRef.current = null;
     };
   }, []);
 
@@ -330,15 +480,31 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
 
       if (modelRef.current) {
         const predictions = await modelRef.current.detect(video, 20, activeConfig.confidenceThreshold);
-        const personDetections = predictions
+        const personDetections: PoseDetectionInput[] = predictions
           .filter((pred) => pred.class === 'person' && pred.score >= activeConfig.confidenceThreshold)
           .map((pred) => ({
             bbox: pred.bbox as [number, number, number, number],
             score: pred.score,
             class: 'Pessoa',
+            posture: 'unknown',
           }));
 
-        const trackerResult = trackerRef.current.update(personDetections, width, height, activeLines, activeRois);
+        // Pose é atualizada em aproximadamente 5 Hz; nos demais frames o último
+        // resultado é reaproveitado para não derrubar o FPS da detecção principal.
+        poseFrameCounterRef.current = (poseFrameCounterRef.current + 1) % 6;
+        const cropCanvas = poseCropCanvasRef.current || document.createElement('canvas');
+        poseCropCanvasRef.current = cropCanvas;
+        const poseUpdate = await enrichWithPose(
+          poseDetectorRef.current,
+          video,
+          personDetections,
+          cropCanvas,
+          lastPoseResultsRef.current,
+          poseFrameCounterRef.current === 0
+        );
+        lastPoseResultsRef.current = poseUpdate.results;
+
+        const trackerResult = trackerRef.current.update(poseUpdate.detections, width, height, activeLines, activeRois);
         detectedPersons = trackerResult.tracked;
         crossings = trackerResult.lineCrossings;
         violations = trackerResult.roiViolations;
@@ -482,7 +648,8 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     // 4. Draw Persons Bounding Boxes
     persons.forEach((person) => {
       const [x, y, w, h] = person.bbox;
-      const boxColor = configRef.current.boxColor || '#00FF66';
+      const postureColor = person.posture === 'fallen' ? '#FF334D' : configRef.current.boxColor || '#00FF66';
+      const boxColor = postureColor;
 
       ctx.save();
 
@@ -532,6 +699,8 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         if (configRef.current.showTrackingId) labelParts.push(`#${person.id}`);
         if (configRef.current.showLabels) labelParts.push('Pessoa');
         if (configRef.current.showConfidence) labelParts.push(`${(person.score * 100).toFixed(1)}%`);
+        if (person.posture === 'standing') labelParts.push('EM PÉ');
+        if (person.posture === 'fallen') labelParts.push('CAÍDA');
 
         const labelText = labelParts.join(' | ');
         ctx.font = 'bold 12px Inter, monospace';
@@ -755,13 +924,21 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       {/* Main Vision Display Screen */}
       <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden group">
         {/* Loading overlay for vision engine */}
-        {isLoadingModel && (
+        {(isLoadingModel || isLoadingPose) && (
           <div className="absolute inset-0 bg-slate-950/90 z-30 flex flex-col items-center justify-center space-y-3 p-6 text-center">
             <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center animate-bounce">
               <Sparkles className="w-6 h-6 text-emerald-400 animate-spin" />
             </div>
-            <p className="text-sm font-semibold text-slate-200">Inicializando detector...</p>
+            <p className="text-sm font-semibold text-slate-200">Inicializando detector e pose...</p>
             <p className="text-xs text-slate-400 max-w-sm">Preparando a detecção de pessoas em tempo real.</p>
+          </div>
+        )}
+
+        {videoSourceType === 'idle' && !isLoadingModel && !isLoadingPose && !modelError && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-950/80 p-6 text-center">
+            <Camera className="h-10 w-10 text-cyan-400" />
+            <p className="text-sm font-semibold text-slate-200">Selecione uma fonte de vídeo</p>
+            <p className="max-w-sm text-xs text-slate-400">Use Upload de Vídeo, Webcam ao Vivo ou Câmera IP para iniciar a detecção e a estimativa de postura.</p>
           </div>
         )}
 

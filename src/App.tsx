@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   VideoSourceType,
   DetectionConfig,
-  SampleVideo,
   CountingLine,
   ROIZone,
   DetectedPerson,
@@ -16,8 +15,6 @@ import { MetricsPanel } from './components/MetricsPanel';
 import { ControlsSidebar } from './components/ControlsSidebar';
 import { AnalyticsSection } from './components/AnalyticsSection';
 import { DetectionLogTable } from './components/DetectionLogTable';
-import { AIInspectorModal } from './components/AIInspectorModal';
-import { SampleVideoPicker } from './components/SampleVideoPicker';
 import { IPCameraModal } from './components/IPCameraModal';
 import { ReportModal } from './components/ReportModal';
 import { PTZControls } from './components/PTZControls';
@@ -25,10 +22,8 @@ import { ShieldAlert, Sparkles, Upload } from 'lucide-react';
 
 export default function App() {
   // Video Source state
-  const [videoSourceType, setVideoSourceType] = useState<VideoSourceType>('sample');
+  const [videoSourceType, setVideoSourceType] = useState<VideoSourceType>('idle');
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [sampleVideos, setSampleVideos] = useState<SampleVideo[]>([]);
-  const [selectedSample, setSelectedSample] = useState<SampleVideo | null>(null);
   const [ipCameraConfig, setIpCameraConfig] = useState<IPCameraConfig | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadedVideoUrlRef = useRef<string | null>(null);
@@ -51,6 +46,8 @@ export default function App() {
 
   // KPI Metrics State
   const [activePersonCount, setActivePersonCount] = useState<number>(0);
+  const [standingPersonCount, setStandingPersonCount] = useState<number>(0);
+  const [fallenPersonCount, setFallenPersonCount] = useState<number>(0);
   const [peakPersonCount, setPeakPersonCount] = useState<number>(0);
   const [trackedIdSet, setTrackedIdSet] = useState<Set<number>>(new Set());
   const [totalLineIn, setTotalLineIn] = useState<number>(0);
@@ -66,36 +63,17 @@ export default function App() {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
 
   // Modals
-  const [isSampleModalOpen, setIsSampleModalOpen] = useState<boolean>(false);
   const [isIpCameraModalOpen, setIsIpCameraModalOpen] = useState<boolean>(false);
-  const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     return (localStorage.getItem('detector-theme') as 'dark' | 'light') || 'dark';
   });
   const [reportSnapshotUrl, setReportSnapshotUrl] = useState<string | null>(null);
 
-  // Canvas Ref callback helper for AI modal
-  const canvasSnapshotRef = useRef<(() => string | null) | null>(null);
-
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', theme === 'light');
     localStorage.setItem('detector-theme', theme);
   }, [theme]);
-
-  // Load sample videos from backend
-  useEffect(() => {
-    fetch('/api/sample-videos')
-      .then((res) => res.json())
-      .then((data: SampleVideo[]) => {
-        if (data && data.length > 0) {
-          setSampleVideos(data);
-          setSelectedSample(data[0]);
-          setVideoUrl(data[0].url);
-        }
-      })
-      .catch((err) => console.error('Failed to load sample videos:', err));
-  }, []);
 
   // Handle File Upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,27 +86,13 @@ export default function App() {
       uploadedVideoUrlRef.current = url;
       setVideoUrl(url);
       setVideoSourceType('file');
-      setSelectedSample(null);
+      setIpCameraConfig(null);
       resetMetrics();
     }
   };
 
-  // Select Sample Video
-  const handleSelectSample = (sample: SampleVideo) => {
-    if (uploadedVideoUrlRef.current) {
-      URL.revokeObjectURL(uploadedVideoUrlRef.current);
-      uploadedVideoUrlRef.current = null;
-    }
-    setSelectedSample(sample);
-    setIpCameraConfig(null);
-    setVideoUrl(sample.url);
-    setVideoSourceType('sample');
-    resetMetrics();
-  };
-
   const handleConnectIPCamera = (camera: IPCameraConfig) => {
     setIpCameraConfig(camera);
-    setSelectedSample(null);
     setVideoUrl(camera.hlsUrl);
     setVideoSourceType('ip-camera');
     resetMetrics();
@@ -146,6 +110,8 @@ export default function App() {
   // Reset Metrics
   const resetMetrics = () => {
     setActivePersonCount(0);
+    setStandingPersonCount(0);
+    setFallenPersonCount(0);
     setPeakPersonCount(0);
     setTrackedIdSet(new Set());
     setTotalLineIn(0);
@@ -166,7 +132,11 @@ export default function App() {
       currentFps: number
     ) => {
       const count = persons.length;
+      const standingCount = persons.filter((person) => person.posture === 'standing').length;
+      const fallenCount = persons.filter((person) => person.posture === 'fallen').length;
       setActivePersonCount(count);
+      setStandingPersonCount(standingCount);
+      setFallenPersonCount(fallenCount);
       setFps(currentFps);
 
       // Peak count check
@@ -261,6 +231,9 @@ export default function App() {
       if (roiViolations.length > 0) {
         alerts.push('Invasão de Zona Restrita');
       }
+      if (fallenCount > 0) {
+        alerts.push(`Possível Queda (${fallenCount})`);
+      }
 
       if (alerts.length > 0 && Math.random() < 0.1) {
         const newLog: DetectionLogItem = {
@@ -303,6 +276,7 @@ export default function App() {
   };
 
   const isCapacityExceeded = activePersonCount > config.alertThreshold;
+  const isFallDetected = fallenPersonCount > 0;
   const currentLineOccupancy = countingLines.reduce((total, line) => total + line.currentCount, 0);
 
   return (
@@ -322,8 +296,6 @@ export default function App() {
         setVideoSourceType={setVideoSourceType}
         fps={fps}
         activePersonCount={activePersonCount}
-        onOpenSamplePicker={() => setIsSampleModalOpen(true)}
-        onOpenAiModal={() => setIsAiModalOpen(true)}
         onOpenReport={() => setIsReportModalOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         onOpenIPCamera={() => setIsIpCameraModalOpen(true)}
@@ -334,27 +306,31 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
         {/* Lotação Excedida Global Alert Banner */}
-        {isCapacityExceeded && (
-          <div className="bg-rose-500/15 border border-rose-500/50 rounded-2xl p-4 flex items-center justify-between text-rose-300 shadow-xl shadow-rose-950/40 animate-pulse">
+                {isCapacityExceeded && (
+          <div className="bg-rose-500/15 border border-rose-500/50 rounded-2xl p-4 flex items-center text-rose-300 shadow-xl shadow-rose-950/40 animate-pulse">
             <div className="flex items-center space-x-3">
               <div className="p-2 rounded-xl bg-rose-500 text-slate-950 font-bold">
                 <ShieldAlert className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white">
-                  ALERTA DE SEGURANÇA: Capacidade de Pessoas Excedida!
-                </h3>
-                <p className="text-xs text-rose-300">
-                  Detectadas <span className="font-bold text-white font-mono">{activePersonCount}</span> pessoas no frame (Limite configurado: {config.alertThreshold}).
-                </p>
+                <h3 className="text-sm font-bold text-white">ALERTA DE SEGURANÇA: Capacidade de Pessoas Excedida!</h3>
+                <p className="text-xs text-rose-300">Detectadas <span className="font-bold text-white font-mono">{activePersonCount}</span> pessoas no frame (Limite configurado: {config.alertThreshold}).</p>
               </div>
             </div>
-            <button
-              onClick={() => setIsAiModalOpen(true)}
-              className="text-xs font-bold px-3 py-1.5 rounded-lg bg-rose-500 text-slate-950 hover:bg-rose-400 transition-colors shadow"
-            >
-              Analisar Com AI
-            </button>
+          </div>
+        )}
+
+        {isFallDetected && (
+          <div className="bg-red-950/40 border border-red-500/70 rounded-2xl p-4 flex items-center text-red-200 shadow-xl shadow-red-950/50 animate-pulse">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-xl bg-red-500 text-slate-950 font-bold">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white">ALERTA: Possível queda detectada</h3>
+                <p className="text-xs text-red-200">O estimador de pose identificou <span className="font-bold text-white font-mono">{fallenPersonCount}</span> pessoa(s) em postura horizontal.</p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -384,6 +360,8 @@ export default function App() {
               totalLineIn={totalLineIn}
               totalLineOut={totalLineOut}
               currentLineOccupancy={currentLineOccupancy}
+              standingPersonCount={standingPersonCount}
+              fallenPersonCount={fallenPersonCount}
               fps={fps}
               alertThreshold={config.alertThreshold}
               isCapacityExceeded={isCapacityExceeded}
@@ -422,7 +400,6 @@ export default function App() {
         Detector de Pessoas &bull; Visão Computacional em Tempo Real
       </footer>
 
-      {/* Sample Videos Picker Modal */}
       <IPCameraModal
         isOpen={isIpCameraModalOpen}
         onClose={() => setIsIpCameraModalOpen(false)}
@@ -438,22 +415,6 @@ export default function App() {
         onCaptureSnapshot={captureReportSnapshot}
       />
 
-      <SampleVideoPicker
-        isOpen={isSampleModalOpen}
-        onClose={() => setIsSampleModalOpen(false)}
-        sampleVideos={sampleVideos}
-        selectedVideoId={selectedSample?.id || null}
-        onSelectSample={handleSelectSample}
-      />
-
-      {/* Gemini AI Visual Inspector Modal */}
-      <AIInspectorModal
-        isOpen={isAiModalOpen}
-        onClose={() => setIsAiModalOpen(false)}
-        activePersonCount={activePersonCount}
-        selectedModel={config.selectedModel}
-        getFrameSnapshotBase64={getCanvasFrameBase64}
-      />
     </div>
   );
 }

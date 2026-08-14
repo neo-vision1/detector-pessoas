@@ -1,21 +1,12 @@
 export type ModelOption = 'yolov8n';
 
-export type VideoSourceType = 'file' | 'webcam' | 'sample' | 'ip-camera';
+export type VideoSourceType = 'idle' | 'file' | 'webcam' | 'ip-camera';
 
 export interface IPCameraConfig {
   name: string;
   hlsUrl: string;
   accessUsername?: string;
   accessPassword?: string;
-}
-
-export interface SampleVideo {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-  url: string;
-  thumbnail: string;
 }
 
 export interface Point {
@@ -30,6 +21,8 @@ export interface Keypoint {
   name?: string;
 }
 
+export type PostureState = 'standing' | 'fallen' | 'unknown';
+
 export interface DetectedPerson {
   id: number;
   bbox: [number, number, number, number]; // [x, y, width, height]
@@ -40,6 +33,7 @@ export interface DetectedPerson {
   trail: Point[];
   speed: number; // pixels per frame or relative
   keypoints?: Keypoint[];
+  posture?: PostureState;
 }
 
 export interface CountingLine {

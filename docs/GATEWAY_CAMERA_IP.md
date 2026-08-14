@@ -64,9 +64,26 @@ Crie um usuário de leitura separado para cada pessoa, com senha diferente e sem
 
 A configuração usa `sourceOnDemand`, de modo que o MediaMTX puxa a câmera somente quando há um leitor conectado. Isso reduz tráfego e uso de recursos quando nenhum usuário está visualizando o stream; essa opção é suportada pela configuração oficial do MediaMTX [6].
 
+## Otimização de latência
+
+A configuração do gateway agora usa Low-Latency HLS com playlist curta e remux contínuo. O MediaMTX documenta que `hlsVariant: lowLatency`, `hlsPartDuration` e `hlsAlwaysRemux` podem ser usados para ajustar a geração do HLS [7]. O player HLS.js também é configurado para iniciar próximo ao live edge, limitar o buffer e reposicionar automaticamente quando a latência estimada ultrapassar quatro segundos [8].
+
+| Parâmetro | Valor aplicado | Objetivo |
+|---|---:|---|
+| `hlsVariant` | `lowLatency` | Usar Low-Latency HLS. |
+| `hlsAlwaysRemux` | `true` | Evitar espera extra para preparar o muxer após a solicitação. |
+| `hlsSegmentCount` | `3` | Manter uma playlist curta. |
+| `hlsSegmentDuration` | `1s` | Limitar a duração-alvo dos segmentos. |
+| `hlsPartDuration` | `100ms` | Permitir partes menores no modo de baixa latência. |
+| `lowLatencyMode` do hls.js | `true` | Fazer o navegador perseguir o live edge. |
+
+A duração efetiva dos segmentos ainda depende do intervalo de quadros-chave/I-frames enviados pela câmera. Configure o stream da Intelbras como **H.264** e, se o firmware disponibilizar a opção, use intervalo de I-frame próximo de um segundo. Para o detector, o substream `subtype=1` em resolução e FPS moderados costuma reduzir o tráfego e o tempo de processamento.
+
 ## Limitações conhecidas
 
-A integração incluída no painel espera HLS porque o vídeo precisa chegar ao navegador para que o detector possa copiar cada frame para o canvas. A implementação não aceita `rtsp://` diretamente no campo da interface. Para reduzir latência e consumo, configure a câmera com H.264, resolução adequada ao monitoramento e taxa de frames compatível com a capacidade do equipamento local.
+A integração incluída no painel espera HLS porque o vídeo precisa chegar ao navegador para que o detector possa copiar cada frame para o canvas. A implementação não aceita `rtsp://` diretamente no campo da interface. HLS continua tendo mais latência que WebRTC, embora seja normalmente mais simples de atravessar firewalls e NAT [5]. Se a latência mínima possível for requisito crítico, a próxima evolução arquitetural é entregar WebRTC/WHEP ao navegador e preservar HLS como fallback.
+
+As configurações de baixa latência também precisam ser aplicadas ao `mediamtx.yml` quando o MediaMTX é executado diretamente no Windows, conforme o roteiro de teste local.
 
 ## Referências
 
@@ -81,3 +98,7 @@ A integração incluída no painel espera HLS porque o vídeo precisa chegar ao 
 [5]: https://mediamtx.org/docs/read/web-browsers "MediaMTX — leitura em navegadores"
 
 [6]: https://mediamtx.org/docs/references/configuration-file "MediaMTX — referência do arquivo de configuração"
+
+[7]: https://mediamtx.org/docs/references/configuration-file "MediaMTX — parâmetros HLS de baixa latência"
+
+[8]: https://github.com/video-dev/hls.js/blob/master/docs/API.md "hls.js — API e configurações de live streaming"

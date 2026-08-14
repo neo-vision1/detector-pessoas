@@ -171,6 +171,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
 
     const video = videoRef.current;
     let hls: Hls | null = null;
+    let latencyRecoveryTimer: number | null = null;
     let cancelled = false;
     const toPlaybackUrl = (source: string) => {
       try {
@@ -200,9 +201,18 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     } else if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
-        // Modo padrão é mais compatível com streams HLS de câmeras IP do que LL-HLS.
-        lowLatencyMode: false,
-        backBufferLength: 30,
+        // O MediaMTX entrega Low-Latency HLS; mantenha o player próximo ao live edge.
+        lowLatencyMode: true,
+        liveSyncMode: 'edge',
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 6,
+        maxLiveSyncPlaybackRate: 1.1,
+        liveSyncOnStallIncrease: 0,
+        initialLiveManifestSize: 1,
+        maxBufferLength: 4,
+        maxMaxBufferLength: 8,
+        backBufferLength: 0,
+        liveDurationInfinity: true,
         xhrSetup: ipCameraAccessUsername && ipCameraAccessPassword
           ? (xhr) => {
               const credentials = btoa(`${ipCameraAccessUsername}:${ipCameraAccessPassword}`);
@@ -215,6 +225,24 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
       // Alguns gateways só entregam o primeiro frame após o buffer inicial.
       hls.on(Hls.Events.FRAG_BUFFERED, startPlayback);
+
+      // Se a rede ou o navegador acumularem atraso, volta ao ponto ao vivo sem
+      // reiniciar o detector nem desmontar o player HLS.
+      latencyRecoveryTimer = window.setInterval(() => {
+        if (cancelled || !hls || video.paused || video.readyState < 2) return;
+        const latency = hls.latency;
+        const livePosition = hls.liveSyncPosition;
+        if (
+          Number.isFinite(latency) &&
+          latency > 4 &&
+          typeof livePosition === 'number' &&
+          Number.isFinite(livePosition) &&
+          livePosition > video.currentTime
+        ) {
+          video.currentTime = livePosition;
+        }
+      }, 1000);
+
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (cancelled || !data.fatal) return;
 
@@ -250,6 +278,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       cancelled = true;
       video.pause();
       video.removeEventListener('loadedmetadata', startPlayback);
+      if (latencyRecoveryTimer !== null) window.clearInterval(latencyRecoveryTimer);
       if (hls) hls.destroy();
       video.removeAttribute('src');
       video.load();

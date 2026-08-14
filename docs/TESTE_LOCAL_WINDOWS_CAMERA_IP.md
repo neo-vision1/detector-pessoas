@@ -95,6 +95,29 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml logs -f mediamt
 
 O MediaMTX busca o RTSP somente quando alguém solicita o vídeo, usando a opção `sourceOnDemand` [2]. Portanto, é normal que a tentativa de conexão com a câmera apareça nos logs somente quando você abrir o HLS.
 
+### Se o MediaMTX for executado diretamente no Windows
+
+Se você usa o executável `mediamtx.exe` em vez do Docker Desktop, abra o arquivo `mediamtx.yml` que fica na mesma pasta do executável e confirme estes parâmetros. Eles reduzem o atraso do HLS sem expor o RTSP no navegador:
+
+```yaml
+hls: true
+hlsAddress: :8888
+hlsVariant: lowLatency
+hlsAlwaysRemux: true
+hlsSegmentCount: 3
+hlsSegmentDuration: 1s
+hlsPartDuration: 100ms
+
+paths:
+  intelbras:
+    source: rtsp://USUARIO:SENHA@192.168.15.2:554/cam/realmonitor?channel=1&subtype=1
+    sourceOnDemand: yes
+```
+
+Faça uma cópia de segurança do `mediamtx.yml` antes de editar. Se o arquivo já tiver uma seção `paths:` ou uma entrada `intelbras:`, altere somente os valores correspondentes; não crie uma segunda seção `paths:`. Depois salve o arquivo, feche o `mediamtx.exe` e inicie-o novamente. O terminal deve mostrar a criação do muxer HLS quando o detector abrir a playlist.
+
+Na interface web da câmera, configure o stream usado pelo detector como **H.264**. Se o firmware oferecer a opção, use intervalo de keyframe/I-frame de aproximadamente 1 segundo; um intervalo grande de I-frames pode impedir que o HLS forme segmentos tão curtos quanto o desejado. Para testar a latência, mantenha primeiro o substream `subtype=1` em resolução e FPS moderados.
+
 ## Etapa 6 — testar o HLS no próprio computador
 
 Abra o navegador no mesmo Windows e acesse:
@@ -149,6 +172,7 @@ Se o vídeo abrir no canvas e a detecção começar, o teste local foi aprovado.
 | `401 Unauthorized` | Use o usuário/senha `STREAM_USER_*` do `.env`, não a conta da câmera. |
 | `404` na URL HLS | Use exatamente `/intelbras/index.m3u8` e mantenha o nome de stream configurado. |
 | O software abre, mas não exibe vídeo | Confirme que ele está em `http://localhost:3000` e que `APP_ORIGIN` tem esse mesmo valor. |
+| O vídeo continua vários segundos atrasado | Confirme `hlsVariant: lowLatency`, `hlsPartDuration: 100ms`, `hlsAlwaysRemux: true`, H.264 e keyframe de aproximadamente 1 segundo; depois reinicie o MediaMTX e o detector. |
 | Porta 8888 em uso | Feche o serviço que utiliza a porta ou altere o mapeamento em `docker-compose.local.yml`. |
 
 ## Depois do teste

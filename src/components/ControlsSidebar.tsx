@@ -222,7 +222,7 @@ export const ControlsSidebar: React.FC<ControlsSidebarProps> = ({
                 <div>
                   <span className="font-bold text-amber-400">{line.name}</span>
                   <span className="text-slate-500 ml-2 font-mono">
-                    IN: {line.countIn} | OUT: {line.countOut}
+                    Presentes: <strong className="text-amber-300">{line.currentCount}</strong>
                   </span>
                 </div>
                 <button

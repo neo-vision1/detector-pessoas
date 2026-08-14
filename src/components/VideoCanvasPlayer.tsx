@@ -449,7 +449,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       ctx.fillStyle = '#FBBF24';
       ctx.font = 'bold 11px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(`${line.name}: IN ${line.countIn} | OUT ${line.countOut}`, midX, midY - 4);
+      ctx.fillText(`${line.name}: PRESENTES ${line.currentCount}`, midX, midY - 4);
       ctx.restore();
     });
 
@@ -568,6 +568,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
           p2: newPoints[1],
           countIn: 0,
           countOut: 0,
+          currentCount: 0,
         };
         setCountingLines((prev) => [...prev, newLine]);
         setDrawingPoints([]);

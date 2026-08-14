@@ -138,6 +138,9 @@ export default function App() {
     setTrackedIdSet(new Set());
     setTotalLineIn(0);
     setTotalLineOut(0);
+    setCountingLines((previousLines) =>
+      previousLines.map((line) => ({ ...line, countIn: 0, countOut: 0, currentCount: 0 }))
+    );
     setLogs([]);
     setChartData([]);
   };
@@ -193,6 +196,8 @@ export default function App() {
               ...line,
               countIn: line.countIn + increment.in,
               countOut: line.countOut + increment.out,
+              // A saída reduz o índice atual, mas não permite saldo negativo.
+              currentCount: Math.max(0, line.currentCount + increment.in - increment.out),
             };
           })
         );
@@ -281,6 +286,7 @@ export default function App() {
   };
 
   const isCapacityExceeded = activePersonCount > config.alertThreshold;
+  const currentLineOccupancy = countingLines.reduce((total, line) => total + line.currentCount, 0);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-slate-950">
@@ -358,6 +364,7 @@ export default function App() {
               totalUniqueTracked={trackedIdSet.size}
               totalLineIn={totalLineIn}
               totalLineOut={totalLineOut}
+              currentLineOccupancy={currentLineOccupancy}
               fps={fps}
               alertThreshold={config.alertThreshold}
               isCapacityExceeded={isCapacityExceeded}

@@ -49,6 +49,7 @@ export interface CountingLine {
   p2: Point; // normalized 0..1
   countIn: number;
   countOut: number;
+  currentCount: number; // saldo atual: entradas menos saídas, nunca negativo
 }
 
 export interface ROIZone {

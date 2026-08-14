@@ -7,6 +7,7 @@ interface MetricsPanelProps {
   totalUniqueTracked: number;
   totalLineIn: number;
   totalLineOut: number;
+  currentLineOccupancy: number;
   fps: number;
   alertThreshold: number;
   isCapacityExceeded: boolean;
@@ -18,6 +19,7 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
   totalUniqueTracked,
   totalLineIn,
   totalLineOut,
+  currentLineOccupancy,
   fps,
   alertThreshold,
   isCapacityExceeded,
@@ -101,19 +103,14 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 my-1">
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 text-center">
-            <span className="text-[10px] text-emerald-400 font-bold uppercase block">Entradas</span>
-            <span className="text-xl font-bold font-mono text-emerald-400">{totalLineIn}</span>
-          </div>
-          <div className="bg-slate-950/80 p-2 rounded-xl border border-slate-800 text-center">
-            <span className="text-[10px] text-rose-400 font-bold uppercase block">Saídas</span>
-            <span className="text-xl font-bold font-mono text-rose-400">{totalLineOut}</span>
-          </div>
+        <div className="my-1 rounded-xl border border-amber-500/30 bg-slate-950/80 p-2 text-center">
+          <span className="block text-[10px] font-bold uppercase text-amber-400">Pessoas na área</span>
+          <span className="text-3xl font-extrabold font-mono text-white">{currentLineOccupancy}</span>
         </div>
 
-        <div className="mt-1 text-[11px] text-slate-400 text-center">
-          Saldo Líquido: <span className="text-white font-bold">{totalLineIn - totalLineOut}</span>
+        <div className="mt-1 flex justify-center gap-3 text-[11px] text-slate-400">
+          <span>Entradas: <strong className="font-mono text-emerald-400">{totalLineIn}</strong></span>
+          <span>Saídas: <strong className="font-mono text-rose-400">{totalLineOut}</strong></span>
         </div>
       </div>
 

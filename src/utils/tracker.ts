@@ -134,7 +134,7 @@ export class SimpleCentroidTracker {
         trackedObject.person.centroid = newCentroid;
         trackedObject.person.bbox = input.bbox;
         trackedObject.person.score = input.score;
-        trackedObject.person.trail = [...trackedObject.person.trail, newCentroid].slice(-12);
+        trackedObject.person.trail = [...trackedObject.person.trail, newCentroid].slice(-4);
         trackedObject.person.speed = Math.round(Math.hypot(dx, dy));
         trackedObject.person.keypoints = input.keypoints;
         trackedObject.person.bodyAspectRatio = input.bodyAspectRatio ?? trackedObject.person.bodyAspectRatio;

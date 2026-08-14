@@ -101,7 +101,7 @@ type PostureAnalysis = {
   bodyAspectRatio: number;
 };
 
-function classifyPosture(keypoints: Keypoint[]): PostureAnalysis {
+function classifyPosture(keypoints: Keypoint[], bboxAspectRatio = 0): PostureAnalysis {
   const visible = keypoints.filter((point) => (point.score ?? 1) >= 0.25);
   const minX = visible.length ? Math.min(...visible.map((point) => point.x)) : 0;
   const maxX = visible.length ? Math.max(...visible.map((point) => point.x)) : 0;
@@ -109,8 +109,10 @@ function classifyPosture(keypoints: Keypoint[]): PostureAnalysis {
   const maxY = visible.length ? Math.max(...visible.map((point) => point.y)) : 0;
   const bodyWidth = maxX - minX;
   const bodyHeight = maxY - minY;
-  const bodyAspectRatio = bodyHeight > 1 ? bodyWidth / bodyHeight : 0;
-  if (visible.length < 5) return { posture: 'unknown', bodyAspectRatio };
+  const bodyAspectRatio = bodyHeight > 1 ? bodyWidth / bodyHeight : bboxAspectRatio;
+  if (visible.length < 5) {
+    return { posture: bboxAspectRatio >= 1.55 ? 'fallen' : 'unknown', bodyAspectRatio };
+  }
 
   const get = (name: string) => visible.find((point) => point.name === name);
   const shoulders = [get('left_shoulder'), get('right_shoulder')].filter(Boolean) as Keypoint[];
@@ -130,14 +132,14 @@ function classifyPosture(keypoints: Keypoint[]): PostureAnalysis {
   const torsoDx = Math.abs(hipCenter.x - shoulderCenter.x);
   const torsoDy = Math.abs(hipCenter.y - shoulderCenter.y);
   const torsoAngleFromVertical = Math.atan2(torsoDx, Math.max(torsoDy, 1));
-  const horizontalBody = bodyAspectRatio > 1.15;
-  const horizontalTorso = torsoAngleFromVertical > 0.95;
-  const lowerBodyAligned = kneeCenter && ankleCenter
-    ? ankleCenter.y > kneeCenter.y && kneeCenter.y > hipCenter.y
-    : true;
+  const horizontalBody = bodyAspectRatio > 1.20;
+  const horizontalBox = bboxAspectRatio >= 1.55;
+  const horizontalTorso = torsoAngleFromVertical > 0.80;
+  const lowerBodyMisaligned = Boolean(kneeCenter && ankleCenter && !(ankleCenter.y > kneeCenter.y && kneeCenter.y > hipCenter.y));
+  const fallenSignals = [horizontalBody, horizontalBox, horizontalTorso, lowerBodyMisaligned].filter(Boolean).length;
 
   return {
-    posture: horizontalBody || horizontalTorso || !lowerBodyAligned ? 'fallen' : 'standing',
+    posture: fallenSignals >= 2 || horizontalBox || torsoAngleFromVertical > 1.15 ? 'fallen' : 'standing',
     bodyAspectRatio,
   };
 }
@@ -204,14 +206,23 @@ async function enrichWithPose(
       }
     });
 
-    if (bestIndex < 0) return { ...detection, posture: 'unknown' as PostureState };
+    if (bestIndex < 0) {
+      const detectionAspectRatio = detection.bbox[2] / Math.max(detection.bbox[3], 1);
+      return {
+        ...detection,
+        posture: detectionAspectRatio >= 1.60 ? 'fallen' : 'unknown' as PostureState,
+        bodyAspectRatio: detectionAspectRatio,
+      };
+    }
     usedPoseIndexes.add(bestIndex);
     const best = results[bestIndex];
+    const detectionAspectRatio = detection.bbox[2] / Math.max(detection.bbox[3], 1);
+    const posture = detectionAspectRatio >= 1.60 ? 'fallen' : best.posture;
     return {
       ...detection,
       keypoints: best.keypoints,
-      posture: best.posture,
-      bodyAspectRatio: best.bodyAspectRatio,
+      posture,
+      bodyAspectRatio: best.bodyAspectRatio || detectionAspectRatio,
     };
   });
 
@@ -326,7 +337,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
           poseDetection.SupportedModels.MoveNet,
           {
             modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-            multiPoseMaxDimension: 256,
+            multiPoseMaxDimension: 192,
             enableSmoothing: true,
             enableTracking: true,
           }
@@ -548,7 +559,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       if (modelRef.current) {
         // A reprodução continua em todos os frames, mas a inferência pesada é
         // limitada a aproximadamente 8 Hz (ou 5,5 Hz em máquinas já lentas).
-        const detectionIntervalMs = fpsRef.current > 0 && fpsRef.current < 20 ? 180 : 120;
+        const detectionIntervalMs = fpsRef.current > 0 && fpsRef.current < 20 ? 260 : 180;
         const shouldRunDetection = now - lastDetectionAtRef.current >= detectionIntervalMs;
 
         if (shouldRunDetection) {
@@ -566,7 +577,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
           // A pose também é adaptativa: aproximadamente 3 Hz com uma pessoa
           // e 2 Hz com várias pessoas, sem bloquear o detector principal.
           if (personDetections.length === 0) lastPoseResultsRef.current = [];
-          const poseIntervalMs = personDetections.length > 2 ? 450 : 320;
+          const poseIntervalMs = personDetections.length > 2 ? 650 : 480;
           const shouldRunPose =
             lastPoseResultsRef.current.length === 0 || now - lastPoseInferenceAtRef.current >= poseIntervalMs;
           if (shouldRunPose) lastPoseInferenceAtRef.current = now;
@@ -752,20 +763,6 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       ctx.strokeStyle = boxColor;
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
-
-      // Motion Trails
-      if (configRef.current.showMotionTrails && person.trail.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(person.trail[0].x, person.trail[0].y);
-        for (let i = 1; i < person.trail.length; i++) {
-          ctx.lineTo(person.trail[i].x, person.trail[i].y);
-        }
-        ctx.strokeStyle = boxColor;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
 
       // Skeleton e keypoints: permanecem visíveis para conferir a qualidade da pose.
       if (person.keypoints && person.keypoints.length > 0) {

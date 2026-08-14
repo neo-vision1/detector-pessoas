@@ -6,7 +6,7 @@ O detector mantém o `COCO-SSD lite_mobilenet_v2` para localizar pessoas e execu
 
 > **Importante:** a implementação histórica do projeto menciona “YOLOv8 Nano”, mas o pacote atualmente usado para localizar pessoas é o COCO-SSD. Uma caixa de detecção, por si só, não contém pontos corporais. O MoveNet foi integrado para entregar os keypoints sem substituir imediatamente o detector e sem comprometer o pipeline de contagem já validado.
 
-A configuração usa `multiPoseMaxDimension: 256`, suavização interna e rastreamento do próprio MoveNet. A detecção COCO-SSD roda em aproximadamente 8 Hz, ou 5,5 Hz quando o FPS já está baixo. A pose é executada por intervalo adaptativo, aproximadamente três vezes por segundo com uma pessoa e duas vezes por segundo com várias pessoas; nos frames intermediários, o último resultado é reutilizado. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
+A configuração usa `multiPoseMaxDimension: 192`, suavização interna e rastreamento do próprio MoveNet. A detecção COCO-SSD roda em aproximadamente 5,5 Hz, ou 3,8 Hz quando o FPS já está baixo. A pose é executada por intervalo adaptativo, aproximadamente duas vezes por segundo com uma pessoa e 1,5 vez por segundo com várias pessoas; nos frames intermediários, o último resultado é reutilizado. As trilhas de movimento não são mais desenhadas e o histórico visual do rastreador foi reduzido para quatro pontos. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
 
 ## Keypoints visíveis
 
@@ -22,7 +22,7 @@ A razão corporal é calculada entre a largura e a altura do conjunto de keypoin
 
 ## Classificação de postura
 
-A classificação combina quatro sinais: razão largura/altura dos keypoints, ângulo do eixo ombro–quadril, ordem vertical entre quadril, joelhos e tornozelos e confiança mínima dos pontos. Quando os sinais indicam uma cadeia corporal predominantemente vertical, o estado é **Em pé**. Quando o corpo ocupa uma configuração predominantemente horizontal ou perde a ordem anatômica esperada, o estado é **Caída**. Se poucos keypoints têm confiança suficiente, o estado permanece **Desconhecido**.
+A classificação combina a razão largura/altura dos keypoints, a razão largura/altura do box, o ângulo do eixo ombro–quadril, a ordem vertical entre quadril, joelhos e tornozelos e a confiança mínima dos pontos. Se o MoveNet não associar um skeleton, a razão do box horizontal é usada como fallback. Quando os sinais indicam uma cadeia corporal predominantemente vertical, o estado é **Em pé**. Quando o corpo ocupa uma configuração predominantemente horizontal ou perde a ordem anatômica esperada, o estado é **Caída**. Se poucos keypoints têm confiança suficiente, o estado permanece **Desconhecido**.
 
 A classificação não muda por causa de um único frame. O rastreador mantém um histórico de até quatro resultados por ID e exige pelo menos dois votos coerentes antes de estabilizar `EM PÉ` ou `CAÍDA`. Isso reduz oscilações, mas também significa que uma transição muito rápida pode aparecer com um pequeno atraso visual.
 
@@ -32,7 +32,7 @@ A classificação não muda por causa de um único frame. O rastreador mantém u
 | `fallen` | Box vermelho, skeleton destacado, rótulo `CAÍDA` e alerta global. |
 | `unknown` | Keypoints podem aparecer, mas o sistema não afirma uma postura. |
 
-A indicação **“Possível queda”** não é diagnóstico médico nem confirmação definitiva de acidente. Uma pessoa deitada voluntariamente, agachada, parcialmente ocluída ou vista em perspectiva extrema pode produzir o mesmo padrão geométrico. Para uso de segurança, o alerta deve ser validado por um operador ou complementado por uma regra temporal de permanência no chão.
+A indicação **“Possível queda”** não é diagnóstico médico nem confirmação definitiva de acidente. A heurística horizontal do box é um fallback para situações em que o skeleton não foi associado, não uma prova isolada de queda. Uma pessoa deitada voluntariamente, agachada, parcialmente ocluída ou vista em perspectiva extrema pode produzir o mesmo padrão geométrico. Para uso de segurança, o alerta deve ser validado por um operador ou complementado por uma regra temporal de permanência no chão.
 
 ## Desempenho e evolução para YOLO Pose
 

@@ -193,6 +193,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
   const [isLoadingPose, setIsLoadingPose] = useState<boolean>(true);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [poseError, setPoseError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(true);
   const [currentTime, setCurrentTime] = useState<number>(0);
@@ -229,43 +230,40 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     onDetectionUpdateRef.current = onDetectionUpdate;
   }, [config, countingLines, roiZones, onDetectionUpdate]);
 
-  // Load Model on Mount
+  // Carrega os modelos em sequência para evitar disputa de memória/backend WebGL.
+  // O COCO-SSD é obrigatório para localizar pessoas; o MoveNet complementa com pose.
   useEffect(() => {
     let isMounted = true;
-    async function loadModel() {
-      try {
-        setIsLoadingModel(true);
-        setModelError(null);
-        // Load fast COCO-SSD engine
-        const loadedModel = await cocoSsd.load({
-          base: 'lite_mobilenet_v2', // High performance browser inference
-        });
-        if (isMounted) {
-          modelRef.current = loadedModel;
-          setIsLoadingModel(false);
-        }
-      } catch (err: any) {
-        console.error('Error loading COCO-SSD model:', err);
-        if (isMounted) {
-          setModelError('Falha ao carregar o modelo YOLOv8/COCO em navegador. Verifique a conexão.');
-          setIsLoadingModel(false);
-        }
-      }
-    }
-    loadModel();
-    return () => {
-      isMounted = false;
-      // Libera o modelo e os buffers associados quando o componente sai da tela.
-      modelRef.current?.dispose?.();
-      modelRef.current = null;
-    };
-  }, []);
 
-  // Pose estimation: MoveNet Lightning é usado por pessoa detectada para manter o
-  // processamento leve. O modelo entrega 17 keypoints corporais no navegador.
-  useEffect(() => {
-    let isMounted = true;
-    async function loadPoseDetector() {
+    const describeModelError = (error: unknown) => {
+      if (error instanceof Error) return error.message;
+      return String(error || 'erro desconhecido');
+    };
+
+    async function loadModels() {
+      setIsLoadingModel(true);
+      setIsLoadingPose(true);
+      setModelError(null);
+      setPoseError(null);
+
+      try {
+        const loadedModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        if (!isMounted) {
+          loadedModel.dispose();
+          return;
+        }
+        modelRef.current = loadedModel;
+        setIsLoadingModel(false);
+      } catch (error) {
+        console.error('Erro ao carregar COCO-SSD:', error);
+        if (isMounted) {
+          setModelError(`Falha ao carregar o detector no navegador. Detalhe: ${describeModelError(error)}`);
+          setIsLoadingModel(false);
+          setIsLoadingPose(false);
+        }
+        return;
+      }
+
       try {
         const detector = await poseDetection.createDetector(
           poseDetection.SupportedModels.MoveNet,
@@ -273,18 +271,25 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         );
         if (isMounted) {
           poseDetectorRef.current = detector;
-          setIsLoadingPose(false);
         } else {
           detector.dispose();
         }
       } catch (error) {
+        // A detecção de pessoas permanece funcional mesmo se a pose não carregar.
         console.error('Erro ao carregar o estimador de pose:', error);
+        if (isMounted) {
+          setPoseError(`Pose indisponível; a detecção de pessoas continuará ativa. Detalhe: ${describeModelError(error)}`);
+        }
+      } finally {
         if (isMounted) setIsLoadingPose(false);
       }
     }
-    void loadPoseDetector();
+
+    void loadModels();
     return () => {
       isMounted = false;
+      modelRef.current?.dispose?.();
+      modelRef.current = null;
       poseDetectorRef.current?.dispose();
       poseDetectorRef.current = null;
     };
@@ -946,7 +951,20 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
         {modelError && (
           <div className="absolute inset-0 bg-slate-950/90 z-30 flex flex-col items-center justify-center space-y-2 p-6 text-center">
             <AlertCircle className="w-8 h-8 text-rose-500" />
-            <p className="text-sm font-bold text-rose-400">{modelError}</p>
+            <p className="max-w-2xl text-sm font-bold text-rose-400">{modelError}</p>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="rounded-lg border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/20"
+            >
+              Recarregar modelos
+            </button>
+          </div>
+        )}
+
+        {poseError && !modelError && (
+          <div className="absolute bottom-4 left-1/2 z-20 max-w-xl -translate-x-1/2 rounded-lg border border-amber-500/40 bg-slate-950/90 px-3 py-2 text-center text-xs text-amber-200 shadow-xl">
+            {poseError}
           </div>
         )}
 

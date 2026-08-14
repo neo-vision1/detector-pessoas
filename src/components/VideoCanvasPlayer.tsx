@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import * as poseDetection from '@tensorflow-models/pose-detection';
-import '@tensorflow/tfjs';
+import * as tf from '@tensorflow/tfjs';
 import Hls from 'hls.js';
 import {
   DetectionConfig,
@@ -64,6 +64,25 @@ type PoseResult = {
   keypoints: Keypoint[];
   posture: PostureState;
 };
+
+async function initializeTensorFlowBackend(): Promise<string> {
+  const preferredBackends = ['webgl', 'cpu'] as const;
+  for (const backend of preferredBackends) {
+    try {
+      if (tf.getBackend() !== backend) {
+        await tf.setBackend(backend);
+      }
+      await tf.ready();
+      if (tf.getBackend() === backend) {
+        console.info(`TensorFlow.js inicializado com backend: ${backend}`);
+        return backend;
+      }
+    } catch (error) {
+      console.warn(`Backend TensorFlow.js ${backend} indisponível:`, error);
+    }
+  }
+  throw new Error('Nenhum backend TensorFlow.js pôde ser inicializado (WebGL/CPU).');
+}
 
 function classifyPosture(keypoints: Keypoint[]): PostureState {
   const visible = keypoints.filter((point) => (point.score ?? 1) >= 0.25);
@@ -247,6 +266,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
       setPoseError(null);
 
       try {
+        await initializeTensorFlowBackend();
         const loadedModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
         if (!isMounted) {
           loadedModel.dispose();

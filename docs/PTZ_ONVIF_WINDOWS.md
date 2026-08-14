@@ -69,10 +69,10 @@ Uma resposta bem-sucedida contém `connected: true` e informações do fabricant
 
 ## Testar um comando por vez
 
-Depois de confirmar o status, envie um movimento curto. A duração é limitada pelo servidor a uma faixa entre 150 e 1500 milissegundos; a interface usa 450 milissegundos para reduzir o risco de movimento contínuo acidental.
+Depois de confirmar o status, envie um movimento curto. A duração é limitada pelo servidor a uma faixa entre 80 e 700 milissegundos; a interface usa pulsos de 180 milissegundos para permitir o enquadramento fino. O servidor envia uma operação `Stop` automaticamente ao final de cada pulso, mesmo quando a câmera não respeita o campo `Timeout` do `ContinuousMove`.
 
 ```powershell
-$body = @{ direction = "left"; durationMs = 450 } | ConvertTo-Json
+$body = @{ direction = "left"; durationMs = 180 } | ConvertTo-Json
 Invoke-RestMethod `
   -Method Post `
   -Uri "http://localhost:3000/api/camera/ptz/move" `

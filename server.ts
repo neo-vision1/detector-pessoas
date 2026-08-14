@@ -105,6 +105,12 @@ async function startServer() {
 
   type PtzDirection = "up" | "down" | "left" | "right";
 
+  let cachedPtzCamera: Cam | null = null;
+  let cachedPtzConfigKey = "";
+  let pendingPtzConnection: Promise<Cam> | null = null;
+  let activePtzTimer: ReturnType<typeof setTimeout> | null = null;
+  let ptzCommandVersion = 0;
+
   const getPtzCamera = async () => {
     if (process.env.CAMERA_PTZ_ENABLED !== "true") {
       throw new Error("O controle PTZ está desativado no servidor.");
@@ -115,13 +121,45 @@ async function startServer() {
     const password = process.env.CAMERA_ONVIF_PASSWORD;
     const port = Number(process.env.CAMERA_ONVIF_PORT || 80);
 
-    if (!hostname || !username || !password || !Number.isFinite(port)) {
+    if (!hostname || !username || !password || !Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error("A configuração ONVIF da câmera está incompleta no arquivo .env.");
     }
 
-    const camera = new Cam({ hostname, username, password, port, timeout: 8000 });
-    await camera.connect();
-    return camera;
+    const configKey = `${hostname}:${port}:${username}:${password}`;
+    if (cachedPtzCamera && cachedPtzConfigKey === configKey) return cachedPtzCamera;
+    if (pendingPtzConnection) return pendingPtzConnection;
+
+    pendingPtzConnection = (async () => {
+      const camera = new Cam({ hostname, username, password, port, timeout: 8000 });
+      await camera.connect();
+      cachedPtzCamera = camera;
+      cachedPtzConfigKey = configKey;
+      return camera;
+    })();
+
+    try {
+      return await pendingPtzConnection;
+    } catch (error) {
+      cachedPtzCamera = null;
+      cachedPtzConfigKey = "";
+      throw error;
+    } finally {
+      pendingPtzConnection = null;
+    }
+  };
+
+  const clearScheduledPtzStop = () => {
+    if (!activePtzTimer) return;
+    clearTimeout(activePtzTimer);
+    activePtzTimer = null;
+  };
+
+  const stopPtzMotion = async (camera?: Cam) => {
+    clearScheduledPtzStop();
+    ptzCommandVersion += 1;
+    const activeCamera = camera || await getPtzCamera();
+    await activeCamera.stop({ panTilt: true, zoom: true });
+    return activeCamera;
   };
 
   const sendPtzError = (res: express.Response, error: unknown) => {
@@ -151,12 +189,14 @@ async function startServer() {
 
   app.post("/api/camera/ptz/move", async (req, res) => {
     const direction = req.body?.direction as PtzDirection;
-    const durationMs = Math.min(Math.max(Number(req.body?.durationMs) || 450, 150), 1500);
+    // Pulsos pequenos facilitam o enquadramento fino. A parada abaixo não depende
+    // do suporte da câmera ao Timeout informado no comando ContinuousMove.
+    const durationMs = Math.min(Math.max(Number(req.body?.durationMs) || 180, 80), 700);
     const vectors: Record<PtzDirection, { x: number; y: number }> = {
-      up: { x: 0, y: 0.55 },
-      down: { x: 0, y: -0.55 },
-      left: { x: -0.55, y: 0 },
-      right: { x: 0.55, y: 0 },
+      up: { x: 0, y: 0.2 },
+      down: { x: 0, y: -0.2 },
+      left: { x: -0.2, y: 0 },
+      right: { x: 0.2, y: 0 },
     };
 
     if (!vectors[direction]) {
@@ -164,10 +204,45 @@ async function startServer() {
       return;
     }
 
+    const commandVersion = ++ptzCommandVersion;
+    clearScheduledPtzStop();
+
     try {
       const camera = await getPtzCamera();
-      await camera.continuousMove({ ...vectors[direction], timeout: durationMs });
-      res.json({ ok: true, direction, durationMs });
+      if (commandVersion !== ptzCommandVersion) {
+        res.json({ ok: false, cancelled: true });
+        return;
+      }
+
+      // Interrompe o movimento anterior antes de iniciar o próximo pulso.
+      await camera.stop({ panTilt: true, zoom: true });
+      if (commandVersion !== ptzCommandVersion) {
+        res.json({ ok: false, cancelled: true });
+        return;
+      }
+
+      await camera.continuousMove({
+        ...vectors[direction],
+        timeout: durationMs,
+        onlySendPanTilt: true,
+      });
+      if (commandVersion !== ptzCommandVersion) {
+        await camera.stop({ panTilt: true, zoom: true });
+        res.json({ ok: false, cancelled: true });
+        return;
+      }
+
+      // Algumas câmeras aceitam ContinuousMove, mas ignoram o Timeout. Por isso,
+      // o servidor sempre envia Stop depois do pulso solicitado.
+      activePtzTimer = setTimeout(() => {
+        if (commandVersion !== ptzCommandVersion) return;
+        activePtzTimer = null;
+        void camera.stop({ panTilt: true, zoom: true }).catch((error) => {
+          console.error("Erro ao parar pulso PTZ automaticamente:", error);
+        });
+      }, durationMs);
+
+      res.json({ ok: true, direction, durationMs, speed: 0.2 });
     } catch (error) {
       sendPtzError(res, error);
     }
@@ -175,8 +250,7 @@ async function startServer() {
 
   app.post("/api/camera/ptz/stop", async (_req, res) => {
     try {
-      const camera = await getPtzCamera();
-      await camera.stop({ panTilt: true, zoom: true });
+      await stopPtzMotion();
       res.json({ ok: true });
     } catch (error) {
       sendPtzError(res, error);
@@ -185,7 +259,7 @@ async function startServer() {
 
   app.post("/api/camera/ptz/home", async (_req, res) => {
     try {
-      const camera = await getPtzCamera();
+      const camera = await stopPtzMotion();
       await camera.gotoHomePosition();
       res.json({ ok: true });
     } catch (error) {

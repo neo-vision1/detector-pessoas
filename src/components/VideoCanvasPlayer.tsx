@@ -175,21 +175,36 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     const video = videoRef.current;
     let hls: Hls | null = null;
     let cancelled = false;
+    const toPlaybackUrl = (source: string) => {
+      try {
+        const parsed = new URL(source);
+        const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+        const isLocalMediaMtx = localHosts.has(parsed.hostname) && parsed.port === '8888';
+        return isLocalMediaMtx ? `/api/hls-proxy?url=${encodeURIComponent(parsed.toString())}` : source;
+      } catch {
+        return source;
+      }
+    };
+    const playbackUrl = toPlaybackUrl(videoUrl);
     const startPlayback = () => {
       if (cancelled) return;
       video.play()
-        .then(() => setIsPlaying(true))
+        .then(() => {
+          setModelError(null);
+          setIsPlaying(true);
+        })
         .catch(() => setModelError('O navegador bloqueou a reprodução automática. Clique em Play para iniciar a câmera.'));
     };
 
     setModelError(null);
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = videoUrl;
+      video.src = playbackUrl;
       video.addEventListener('loadedmetadata', startPlayback, { once: true });
     } else if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        // Modo padrão é mais compatível com streams HLS de câmeras IP do que LL-HLS.
+        lowLatencyMode: false,
         backBufferLength: 30,
         xhrSetup: ipCameraAccessUsername && ipCameraAccessPassword
           ? (xhr) => {
@@ -198,9 +213,11 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
             }
           : undefined,
       });
-      hls.loadSource(videoUrl);
+      hls.loadSource(playbackUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, startPlayback);
+      // Alguns gateways só entregam o primeiro frame após o buffer inicial.
+      hls.on(Hls.Events.FRAG_BUFFERED, startPlayback);
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (cancelled || !data.fatal) return;
 

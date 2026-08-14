@@ -25,6 +25,82 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // Proxy apenas o HLS do MediaMTX local. Isso elimina bloqueios de CORS no
+  // detector sem transformar o servidor em um proxy aberto para a rede.
+  const isAllowedLocalHlsUrl = (url: URL) => {
+    const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+    return (
+      ["http:", "https:"].includes(url.protocol) &&
+      localHosts.has(url.hostname) &&
+      (url.port === "8888" || url.port === "")
+    );
+  };
+
+  const asProxyUrl = (url: URL) => `/api/hls-proxy?url=${encodeURIComponent(url.toString())}`;
+
+  const rewriteHlsPlaylist = (playlist: string, sourceUrl: URL) =>
+    playlist
+      .split(/\r?\n/)
+      .map((line) => {
+        const rewriteUri = (uri: string) => asProxyUrl(new URL(uri, sourceUrl));
+        if (!line) return line;
+        if (!line.startsWith("#")) return rewriteUri(line);
+        return line.replace(/URI="([^"]+)"/g, (_match, uri) => `URI="${rewriteUri(uri)}"`);
+      })
+      .join("\n");
+
+  app.get("/api/hls-proxy", async (req, res) => {
+    const target = typeof req.query.url === "string" ? req.query.url : "";
+    let sourceUrl: URL;
+
+    try {
+      sourceUrl = new URL(target);
+    } catch {
+      res.status(400).json({ error: "URL HLS inválida." });
+      return;
+    }
+
+    if (!isAllowedLocalHlsUrl(sourceUrl)) {
+      res.status(403).json({ error: "O proxy aceita somente o HLS local do MediaMTX." });
+      return;
+    }
+
+    try {
+      const headers: Record<string, string> = {};
+      if (typeof req.headers.range === "string") headers.range = req.headers.range;
+
+      const upstream = await fetch(sourceUrl, {
+        headers,
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!upstream.ok) {
+        res.status(upstream.status).json({ error: `MediaMTX respondeu ${upstream.status}.` });
+        return;
+      }
+
+      const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+      const isPlaylist = contentType.includes("mpegurl") || sourceUrl.pathname.endsWith(".m3u8");
+
+      res.status(upstream.status);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Content-Type", isPlaylist ? "application/vnd.apple.mpegurl" : contentType);
+      const contentRange = upstream.headers.get("content-range");
+      if (contentRange) res.setHeader("Content-Range", contentRange);
+
+      if (isPlaylist) {
+        const playlist = await upstream.text();
+        res.send(rewriteHlsPlaylist(playlist, sourceUrl));
+        return;
+      }
+
+      res.send(Buffer.from(await upstream.arrayBuffer()));
+    } catch (error) {
+      console.error("Erro no proxy HLS local:", error);
+      res.status(502).json({ error: "Não foi possível ler o HLS local do MediaMTX." });
+    }
+  });
+
   // Sample Videos API
   app.get("/api/sample-videos", (_req, res) => {
     res.json([

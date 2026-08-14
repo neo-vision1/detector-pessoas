@@ -19,7 +19,8 @@ import { DetectionLogTable } from './components/DetectionLogTable';
 import { AIInspectorModal } from './components/AIInspectorModal';
 import { SampleVideoPicker } from './components/SampleVideoPicker';
 import { IPCameraModal } from './components/IPCameraModal';
-import { ShieldAlert, Cpu, Sparkles, Upload, FileVideo } from 'lucide-react';
+import { ReportModal } from './components/ReportModal';
+import { ShieldAlert, Sparkles, Upload } from 'lucide-react';
 
 export default function App() {
   // Video Source state
@@ -67,9 +68,19 @@ export default function App() {
   const [isSampleModalOpen, setIsSampleModalOpen] = useState<boolean>(false);
   const [isIpCameraModalOpen, setIsIpCameraModalOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('detector-theme') as 'dark' | 'light') || 'dark';
+  });
+  const [reportSnapshotUrl, setReportSnapshotUrl] = useState<string | null>(null);
 
   // Canvas Ref callback helper for AI modal
   const canvasSnapshotRef = useRef<(() => string | null) | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('theme-light', theme === 'light');
+    localStorage.setItem('detector-theme', theme);
+  }, [theme]);
 
   // Load sample videos from backend
   useEffect(() => {
@@ -285,6 +296,11 @@ export default function App() {
     return canvas.toDataURL('image/jpeg', 0.85);
   };
 
+  const captureReportSnapshot = () => {
+    const snapshot = getCanvasFrameBase64();
+    if (snapshot) setReportSnapshotUrl(snapshot);
+  };
+
   const isCapacityExceeded = activePersonCount > config.alertThreshold;
   const currentLineOccupancy = countingLines.reduce((total, line) => total + line.currentCount, 0);
 
@@ -303,13 +319,15 @@ export default function App() {
       <Navbar
         videoSourceType={videoSourceType}
         setVideoSourceType={setVideoSourceType}
-        selectedModel={config.selectedModel}
         fps={fps}
         activePersonCount={activePersonCount}
         onOpenSamplePicker={() => setIsSampleModalOpen(true)}
         onOpenAiModal={() => setIsAiModalOpen(true)}
+        onOpenReport={() => setIsReportModalOpen(true)}
         onUploadClick={() => fileInputRef.current?.click()}
         onOpenIPCamera={() => setIsIpCameraModalOpen(true)}
+        theme={theme}
+        onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
       />
 
       {/* Main Container */}
@@ -399,7 +417,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-500 font-mono">
-        YOLOv8 Ultralytics Computer Vision Engine &bull; Google AI Studio
+        Detector de Pessoas &bull; Visão Computacional em Tempo Real
       </footer>
 
       {/* Sample Videos Picker Modal */}
@@ -407,6 +425,15 @@ export default function App() {
         isOpen={isIpCameraModalOpen}
         onClose={() => setIsIpCameraModalOpen(false)}
         onConnect={handleConnectIPCamera}
+      />
+
+      <ReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        chartData={chartData}
+        logs={logs}
+        snapshotUrl={reportSnapshotUrl}
+        onCaptureSnapshot={captureReportSnapshot}
       />
 
       <SampleVideoPicker

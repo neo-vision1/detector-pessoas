@@ -19,12 +19,10 @@ import {
   VolumeX,
   Camera,
   Maximize,
-  Sliders,
   Sparkles,
   MousePointer,
   PenTool,
   ShieldAlert,
-  Download,
   Video,
   VideoOff,
   Square,
@@ -76,7 +74,6 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   const [modelError, setModelError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(true);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
   const [drawingMode, setDrawingMode] = useState<'none' | 'line' | 'roi'>('none');
@@ -672,20 +669,32 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
     }
   };
 
-  // Speed Change
-  const handleSpeedChange = (speed: number) => {
-    setPlaybackSpeed(speed);
-    if (videoRef.current) {
-      videoRef.current.playbackRate = speed;
-    }
-  };
-
   // Seek time
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTime = parseFloat(e.target.value);
     setCurrentTime(newTime);
     if (videoRef.current) {
       videoRef.current.currentTime = newTime;
+    }
+  };
+
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === playerContainerRef.current);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (!playerContainerRef.current) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await playerContainerRef.current.requestFullscreen();
     }
   };
 
@@ -697,7 +706,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   };
 
   return (
-    <div className="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+    <div ref={playerContainerRef} className={`relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col ${isFullscreen ? 'h-screen w-screen rounded-none' : ''}`}>
       {/* Hidden Video Source */}
       <video
         ref={videoRef}
@@ -722,8 +731,8 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
             <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center animate-bounce">
               <Sparkles className="w-6 h-6 text-emerald-400 animate-spin" />
             </div>
-            <p className="text-sm font-semibold text-slate-200">Inicializando YOLOv8 Nano...</p>
-            <p className="text-xs text-slate-400 max-w-sm">Carregando o único modelo ativo para detecção de pessoas em tempo real.</p>
+            <p className="text-sm font-semibold text-slate-200">Inicializando detector...</p>
+            <p className="text-xs text-slate-400 max-w-sm">Preparando a detecção de pessoas em tempo real.</p>
           </div>
         )}
 
@@ -867,23 +876,6 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
             </button>
           </div>
 
-          {/* Speed Selector */}
-          <div className="flex items-center space-x-1 bg-slate-900 border border-slate-800 rounded-lg p-1">
-            {[0.5, 1, 2, 5].map((speed) => (
-              <button
-                key={speed}
-                onClick={() => handleSpeedChange(speed)}
-                className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded transition-all ${
-                  playbackSpeed === speed
-                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {speed}x
-              </button>
-            ))}
-          </div>
-
           {/* Right Snapshot & Fullscreen */}
           <div className="flex items-center space-x-2">
             <button
@@ -892,6 +884,13 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
             >
               <Camera className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden sm:inline">Capturar Frame</span>
+            </button>
+            <button
+              onClick={toggleFullscreen}
+              title={isFullscreen ? 'Sair da tela cheia' : 'Maximizar tela'}
+              className="rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+            >
+              <Maximize className="h-4 w-4" />
             </button>
           </div>
         </div>

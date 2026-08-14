@@ -1,1 +1,79 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #020617;
+}
+
+/* O tema claro reutiliza as classes Tailwind existentes sem duplicar a interface. */
+.theme-light body {
+  background: #f1f5f9;
+}
+
+.theme-light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+.theme-light .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+
+.theme-light .bg-slate-800 {
+  background-color: #e2e8f0 !important;
+}
+
+.theme-light .bg-slate-950\/60,
+.theme-light .bg-slate-950\/80,
+.theme-light .bg-slate-900\/90 {
+  background-color: rgba(226, 232, 240, 0.82) !important;
+}
+
+.theme-light .border-slate-800,
+.theme-light .border-slate-700,
+.theme-light .border-slate-800\/80 {
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light .text-slate-100,
+.theme-light .text-slate-200 {
+  color: #0f172a !important;
+}
+
+.theme-light .text-slate-300 {
+  color: #334155 !important;
+}
+
+.theme-light .text-slate-400,
+.theme-light .text-slate-500 {
+  color: #64748b !important;
+}
+
+.theme-light .text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+.theme-light .hover\:bg-slate-800:hover {
+  background-color: #cbd5e1 !important;
+}
+
+.theme-light .hover\:bg-slate-700:hover {
+  background-color: #cbd5e1 !important;
+}
+
+.theme-light input,
+.theme-light select {
+  color: #0f172a;
+}
+
+/* O canvas mantém fundo escuro para preservar a leitura da imagem e das marcações. */
+.theme-light .bg-black {
+  background-color: #0f172a !important;
+}

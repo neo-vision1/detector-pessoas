@@ -77,13 +77,6 @@ const POSE_CONNECTIONS: Array<[string, string]> = [
   ['right_hip', 'right_knee'], ['right_knee', 'right_ankle'],
 ];
 
-const POSE_LABELS: Record<string, string> = {
-  nose: 'N', left_shoulder: 'O.E', right_shoulder: 'O.D',
-  left_hip: 'Q.E', right_hip: 'Q.D', left_knee: 'J.E',
-  right_knee: 'J.D', left_ankle: 'T.E', right_ankle: 'T.D',
-  left_elbow: 'C.E', right_elbow: 'C.D', left_wrist: 'P.E', right_wrist: 'P.D',
-};
-
 async function initializeTensorFlowBackend(): Promise<string> {
   const preferredBackends = ['webgl', 'cpu'] as const;
   for (const backend of preferredBackends) {
@@ -245,7 +238,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
   // COCO-SSD / Vision model ref
   const modelRef = useRef<cocoSsd.ObjectDetection | null>(null);
   const poseDetectorRef = useRef<poseDetection.PoseDetector | null>(null);
-  const poseFrameCounterRef = useRef(0);
+  const lastPoseInferenceAtRef = useRef(0);
   const lastPoseResultsRef = useRef<PoseResult[]>([]);
   const trackerRef = useRef<SimpleCentroidTracker>(new SimpleCentroidTracker());
 
@@ -330,7 +323,7 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
           poseDetection.SupportedModels.MoveNet,
           {
             modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-            multiPoseMaxDimension: 320,
+            multiPoseMaxDimension: 256,
             enableSmoothing: true,
             enableTracking: true,
           }
@@ -560,15 +553,19 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
             posture: 'unknown',
           }));
 
-        // Pose é atualizada em aproximadamente 5 Hz; nos demais frames o último
-        // resultado é reaproveitado para não derrubar o FPS da detecção principal.
-        poseFrameCounterRef.current = (poseFrameCounterRef.current + 1) % 6;
+        // A pose roda por intervalo de tempo: aproximadamente 3 Hz com uma
+        // pessoa e 2 Hz com várias pessoas, sem bloquear o detector principal.
+        if (personDetections.length === 0) lastPoseResultsRef.current = [];
+        const poseIntervalMs = personDetections.length > 2 ? 450 : 320;
+        const shouldRunPose =
+          lastPoseResultsRef.current.length === 0 || now - lastPoseInferenceAtRef.current >= poseIntervalMs;
+        if (shouldRunPose) lastPoseInferenceAtRef.current = now;
         const poseUpdate = await enrichWithPose(
           poseDetectorRef.current,
           video,
           personDetections,
           lastPoseResultsRef.current,
-          poseFrameCounterRef.current === 0
+          shouldRunPose
         );
         lastPoseResultsRef.current = poseUpdate.results;
 
@@ -772,11 +769,6 @@ export const VideoCanvasPlayer: React.FC<VideoCanvasPlayerProps> = ({
           ctx.beginPath();
           ctx.arc(kp.x, kp.y, 4, 0, Math.PI * 2);
           ctx.fill();
-          if (kp.name && POSE_LABELS[kp.name]) {
-            ctx.font = 'bold 10px monospace';
-            ctx.fillStyle = '#FFFFFF';
-            ctx.fillText(POSE_LABELS[kp.name], kp.x + 5, kp.y - 5);
-          }
         });
       }
 

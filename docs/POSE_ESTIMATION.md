@@ -6,21 +6,17 @@ O detector mantém o `COCO-SSD lite_mobilenet_v2` para localizar pessoas e execu
 
 > **Importante:** a implementação histórica do projeto menciona “YOLOv8 Nano”, mas o pacote atualmente usado para localizar pessoas é o COCO-SSD. Uma caixa de detecção, por si só, não contém pontos corporais. O MoveNet foi integrado para entregar os keypoints sem substituir imediatamente o detector e sem comprometer o pipeline de contagem já validado.
 
-A configuração usa `multiPoseMaxDimension: 320`, suavização interna e rastreamento do próprio MoveNet. A inferência é executada aproximadamente cinco vezes por segundo; nos frames intermediários, o último resultado é reutilizado. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
+A configuração usa `multiPoseMaxDimension: 256`, suavização interna e rastreamento do próprio MoveNet. A inferência é executada por intervalo adaptativo, aproximadamente três vezes por segundo com uma pessoa e duas vezes por segundo com várias pessoas; nos frames intermediários, o último resultado é reutilizado. O processamento continua limitado pelo retorno multipose do modelo, que suporta até seis pessoas, evitando uma chamada de pose separada para cada caixa.
 
 ## Keypoints visíveis
 
-O skeleton é desenhado diretamente sobre cada pessoa detectada. Os círculos representam os pontos com confiança suficiente, as linhas representam as conexões corporais e as abreviações indicam a região anatômica.
+O skeleton é desenhado diretamente sobre cada pessoa detectada. Os círculos representam os pontos com confiança suficiente e as linhas representam as conexões corporais. Os textos individuais de cada ponto foram removidos para reduzir o custo de renderização; a razão `R:valor` continua visível no box.
 
 | Abreviação | Região |
 |---|---|
-| `O.E` / `O.D` | Ombro esquerdo / direito |
-| `Q.E` / `Q.D` | Quadril esquerdo / direito |
-| `J.E` / `J.D` | Joelho esquerdo / direito |
-| `T.E` / `T.D` | Tornozelo esquerdo / direito |
-| `C.E` / `C.D` | Cotovelo esquerdo / direito |
-| `P.E` / `P.D` | Pulso esquerdo / direito |
-| `N` | Nariz |
+| Pontos visíveis | Ombros, quadril, joelhos, tornozelos, cotovelos, pulsos e nariz |
+| Skeleton | Linhas conectando as articulações com confiança suficiente |
+| `R:valor` | Razão largura/altura dos keypoints visíveis |
 
 A etiqueta do box também exibe `R:valor`, em que `valor` é a razão entre a largura e a altura do conjunto de keypoints visíveis. Uma razão maior indica uma configuração mais horizontal, mas ela não deve ser usada isoladamente porque perspectiva, oclusão e enquadramento alteram a medida.
 
